@@ -1,0 +1,86 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap");
+@import "tailwindcss";
+@config "../tailwind.config.ts";
+
+@layer base {
+  :root {
+    --background: 40 20% 98%;
+    --foreground: 150 15% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 150 15% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 150 15% 12%;
+    --primary: 150 45% 22%;
+    --primary-foreground: 40 20% 98%;
+    --secondary: 110 20% 80%;
+    --secondary-foreground: 150 45% 22%;
+    --muted: 40 10% 94%;
+    --muted-foreground: 150 8% 40%;
+    --accent: 40 18% 92%;
+    --accent-foreground: 150 15% 12%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 40 10% 88%;
+    --input: 40 10% 88%;
+    --ring: 150 45% 22%;
+    --radius: 0.75rem;
+    --leaf: 142 40% 42%;
+    --sage: 110 20% 80%;
+    --ai-accent: 260 60% 60%;
+    --success: 142 55% 38%;
+    --warning: 38 92% 50%;
+    --info: 205 70% 50%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 150 15% 12%;
+    --sidebar-primary: 150 45% 22%;
+    --sidebar-primary-foreground: 40 20% 98%;
+    --sidebar-accent: 40 10% 94%;
+    --sidebar-accent-foreground: 150 15% 12%;
+    --sidebar-border: 40 10% 88%;
+    --sidebar-ring: 150 45% 22%;
+  }
+
+  .dark {
+    --background: 150 15% 8%;
+    --foreground: 40 20% 96%;
+    --card: 150 14% 11%;
+    --card-foreground: 40 20% 96%;
+    --popover: 150 14% 11%;
+    --popover-foreground: 40 20% 96%;
+    --primary: 142 45% 58%;
+    --primary-foreground: 150 20% 8%;
+    --secondary: 110 18% 25%;
+    --secondary-foreground: 40 20% 96%;
+    --muted: 150 10% 17%;
+    --muted-foreground: 110 8% 65%;
+    --accent: 150 10% 17%;
+    --accent-foreground: 40 20% 96%;
+    --destructive: 0 62% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 150 10% 22%;
+    --input: 150 10% 22%;
+    --ring: 142 45% 58%;
+    --leaf: 142 45% 58%;
+    --sage: 110 18% 26%;
+    --ai-accent: 260 75% 74%;
+    --success: 142 55% 58%;
+    --warning: 38 92% 62%;
+    --info: 205 80% 64%;
+    --sidebar-background: 150 15% 7%;
+    --sidebar-foreground: 40 20% 96%;
+    --sidebar-primary: 142 45% 58%;
+    --sidebar-primary-foreground: 150 20% 8%;
+    --sidebar-accent: 150 10% 17%;
+    --sidebar-accent-foreground: 40 20% 96%;
+    --sidebar-border: 150 10% 22%;
+    --sidebar-ring: 142 45% 58%;
+  }
+
+  * { @apply border-border; }
+  html { font-family: "DM Sans", sans-serif; color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  body { @apply bg-background text-foreground antialiased; min-width: 320px; }
+  h1, h2, h3, h4 { font-family: "Manrope", sans-serif; }
+  button, a, input { -webkit-tap-highlight-color: transparent; }
+  button:focus-visible, a:focus-visible, input:focus-visible { @apply outline-none ring-2 ring-primary/40 ring-offset-2 ring-offset-background; }
+}
