@@ -34,6 +34,8 @@ import { useTheme } from "next-themes";
 import Index from "./pages/Index";
 import PlantsPage from "./pages/PlantsPage";
 import NotFound from "./pages/NotFound";
+import ScanPage from "./pages/ScanPage";
+import ScanResultsPage from "./pages/ScanResultsPage";
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, to: "/dashboard" },
@@ -173,7 +175,8 @@ function PlaceholderPage({ title, icon: Icon = CircleHelp }: { title: string; ic
 }
 
 export default function App() {
-  return <ThemeProvider attribute="class" defaultTheme="system" enableSystem storageKey="plantguard-theme"><BrowserRouter><Toaster /><Sonner /><Routes><Route element={<AppShell />}><Route path="/" element={<Index />} /><Route path="/dashboard" element={<Index />} /><Route path="/plants" element={<PlantsPage />} /><Route path="/scan" element={<PlaceholderPage title="Plant scanning" icon={ScanLine} />} /><Route path="/history" element={<PlaceholderPage title="Scan history" icon={History} />} /><Route path="/recommendations" element={<PlaceholderPage title="Recommendations" icon={FileText} />} /><Route path="/weather" element={<PlaceholderPage title="Weather insights" icon={CloudSun} />} /><Route path="/chat" element={<PlaceholderPage title="AI assistant" icon={Bot} />} /><Route path="/profile" element={<PlaceholderPage title="Your profile" icon={UserRound} />} /><Route path="/settings" element={<PlaceholderPage title="Settings" icon={Settings} />} /><Route path="*" element={<NotFound />} /></Route></Routes></BrowserRouter></ThemeProvider>;
+  return <ThemeProvider attribute="class" defaultTheme="system" enableSystem storageKey="plantguard-theme"><BrowserRouter><Toaster /><Sonner /><Routes><Route element={<AppShell />}><Route path="/" element={<Index />} /><Route path="/dashboard" element={<Index />} /><Route path="/plants" element={<PlantsPage />} /><Route path="/scan" element={<ScanPage />} />
+<Route path="/scan/results/:scanId" element={<ScanResultsPage />} /><Route path="/history" element={<PlaceholderPage title="Scan history" icon={History} />} /><Route path="/recommendations" element={<PlaceholderPage title="Recommendations" icon={FileText} />} /><Route path="/weather" element={<PlaceholderPage title="Weather insights" icon={CloudSun} />} /><Route path="/chat" element={<PlaceholderPage title="AI assistant" icon={Bot} />} /><Route path="/profile" element={<PlaceholderPage title="Your profile" icon={UserRound} />} /><Route path="/settings" element={<PlaceholderPage title="Settings" icon={Settings} />} /><Route path="*" element={<NotFound />} /></Route></Routes></BrowserRouter></ThemeProvider>;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
