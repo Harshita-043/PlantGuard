@@ -36,6 +36,8 @@ import PlantsPage from "./pages/PlantsPage";
 import NotFound from "./pages/NotFound";
 import ScanPage from "./pages/ScanPage";
 import ScanResultsPage from "./pages/ScanResultsPage";
+import HistoryPage from "./pages/HistoryPage";
+import SettingsPage from "./pages/SettingsPage";
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, to: "/dashboard" },
@@ -48,7 +50,7 @@ const navItems = [
 ];
 
 const secondaryItems = [
-  { label: "Profile", icon: UserRound, to: "/profile" },
+  { label: "Profile", icon: UserRound, to: "/profile" ],
   { label: "Settings", icon: Settings, to: "/settings" },
 ];
 

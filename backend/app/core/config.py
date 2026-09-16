@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     # ML Model Settings
     ML_MODEL_PATH: str = "./ml-models"  # Base path for model artifacts
-    USE_MOCK_MODELS: bool = True  # Set to False to use real models
+    ML_MODE: str = "mock"  # "mock" or "real" - controls whether to use mock or real ML models
 
     # File Upload
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10 MB

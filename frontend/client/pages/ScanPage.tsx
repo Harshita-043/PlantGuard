@@ -7,12 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Toaster, toast } from "@/components/ui/toaster";
-import { scanApi } from "@/lib/api";
+import { analysisApi, PlantAnalysisResponse, LeafResult, PlantHealthSummary } from "@/lib/api";
 
 export default function ScanPage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [scanResult, setScanResult] = useState<any>(null);
+  const [analysisResult, setAnalysisResult] = useState<PlantAnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -26,7 +26,7 @@ export default function ScanPage() {
       }
       setImageFile(file);
       setError(null);
-      setScanResult(null);
+      setAnalysisResult(null);
     }
   };
 
@@ -40,26 +40,18 @@ export default function ScanPage() {
     setError(null);
 
     try {
-      const response = await scanApi.uploadScan(imageFile);
-      // In a real app, we would redirect to a results page with the scan ID
-      // For now, we'll simulate getting results
+      const response = await analysisApi.analyzeImage(imageFile);
       setIsProcessing(false);
+      setAnalysisResult(response);
 
-      // Mock successful scan - in reality we would fetch the actual results
-      setScanResult({
-        scanId: response.scan_id,
-        message: response.message,
-        status: response.status
-      });
-
-      // Navigate to results page (we'll create this next)
-      navigate(`/scan/results/${response.scan_id}`);
+      // Navigate to results page with the analysis ID
+      navigate(`/scan/results/${response.analysis_id}`);
     } catch (err: any) {
       setIsProcessing(false);
-      setError(err.message || "An error occurred during scanning");
-      toast.error("Scan failed: " + err.message);
+      setError(err.message || "An error occurred during analysis");
+      toast.error("Analysis failed: " + err.message);
     }
-  }, [imageFile, navigate]);
+  }, [imageFile, navigate, analysisApi]);
 
   const handleRetakeClick = () => {
     setImageFile(null);
@@ -67,16 +59,16 @@ export default function ScanPage() {
     setError(null);
   };
 
-  if (scanResult) {
+  if (analysisResult) {
     // Show results temporarily before redirecting
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-center space-x-3">
           <CheckCircle size={24} className="text-success" />
-          <h2 className="text-xl font-semibold">Scan Complete!</h2>
+          <h2 className="text-xl font-semibold">Analysis Complete!</h2>
         </div>
         <p className="text-muted-foreground">
-          Your plant scan has been processed. Redirecting to results...
+          Your plant analysis has been processed. Redirecting to results...
         </p>
         <div className="flex justify-center">
           <Button variant="outline" onClick={handleRetakeClick}>
