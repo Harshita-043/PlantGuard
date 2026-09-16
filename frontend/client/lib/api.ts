@@ -1,76 +1,82 @@
-import { ScanResponse, ScanSummary, ScanDetail, HealthReportResponse } from '@/shared/api';
+import {
+  PlantAnalysisResponse,
+  LeafResult,
+  PlantHealthSummary
+} from '@/shared/api';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
-export const scanApi = {
+export const analysisApi = {
   /**
-   * Upload a plant image and initiate health analysis
+   * Analyze a plant image for health assessment
    */
-  uploadScan: async (imageFile: File): Promise<ScanResponse> => {
+  analyzeImage: async (imageFile: File): Promise<PlantAnalysisResponse> => {
     const formData = new FormData();
     formData.append('file', imageFile);
 
-    const response = await fetch(`${API_BASE_URL}/api/scan`, {
+    const response = await fetch(`${API_BASE_URL}/api/v1/analyze/image`, {
       method: 'POST',
       body: formData,
     });
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.detail || 'Failed to process scan');
+      throw new Error(errorData.detail || 'Failed to analyze image');
     }
 
     return response.json();
   },
 
   /**
-   * Get paginated list of user's scans
+   * Analyze a plant video frame for health assessment
    */
-  getScanHistory: async (skip = 0, limit = 10): Promise<ScanSummary[]> => {
-    const response = await fetch(`${API_BASE_URL}/api/scans?skip=${skip}&limit=${limit}`);
+  analyzeVideo: async (videoFile: File): Promise<PlantAnalysisResponse> => {
+    const formData = new FormData();
+    formData.append('file', videoFile);
+
+    const response = await fetch(`${API_BASE_URL}/api/v1/analyze/video`, {
+      method: 'POST',
+      body: formData,
+    });
 
     if (!response.ok) {
-      throw new Error('Failed to fetch scan history');
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to analyze video');
     }
 
     return response.json();
   },
 
   /**
-   * Get detailed results for a specific scan
+   * Get analysis results by ID
    */
-  getScanDetails: async (scanId: string): Promise<ScanDetail> => {
-    const response = await fetch(`${API_BASE_URL}/api/scans/${scanId}`);
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new Error('Scan not found');
-      }
-      throw new Error('Failed to fetch scan details');
-    }
-
-    return response.json();
-  },
-
-  /**
-   * Get formatted health report for a specific scan
-   */
-  getScanReport: async (scanId: string): Promise<HealthReportResponse> => {
-    const response = await fetch(`${API_BASE_URL}/api/scans/${scanId}/report`);
+  getAnalysis: async (analysisId: string): Promise<PlantAnalysisResponse> => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/analyze/${analysisId}`);
 
     if (!response.ok) {
       if (response.status === 404) {
-        throw new Error('Scan not found');
+        throw new Error('Analysis not found');
       }
-      throw new Error('Failed to fetch scan report');
+      throw new Error('Failed to fetch analysis');
     }
 
+    return response.json();
+  },
+
+  /**
+   * Health check for the analysis service
+   */
+  healthCheck: async (): Promise<{ status: string; service: string; ml_mode: string }> => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/analyze/health`);
+    if (!response.ok) {
+      throw new Error('Health check failed');
+    }
     return response.json();
   }
 };
 
-// Health check endpoints
-export const healthApi = {
+// Legacy API endpoints (keeping for compatibility)
+export const legacyApi = {
   ping: async (): Promise<{ message: string }> => {
     const response = await fetch(`${API_BASE_URL}/api/ping`);
     return response.json();

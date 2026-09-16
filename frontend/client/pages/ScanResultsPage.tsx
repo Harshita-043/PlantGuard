@@ -1,43 +1,41 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Leaf, AlertTriangle, CheckCircle, Loader, RefreshCw, TrendingUp, FileText, Settings } from "lucide-react";
+import { Leaf, AlertTriangle, CheckCircle, Loader, RefreshCw, TrendingUp, FileText, Settings, CircleHelp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Toaster, toast } from "@/components/ui/toaster";
-import { scanApi, HealthReportResponse, ScanDetail, LeafResult } from "@/lib/api";
+import { analysisApi, PlantAnalysisResponse, LeafResult, PlantHealthSummary } from "@/lib/api";
+import { LeafOverlay } from "@/components/scan/LeafOverlay";
 
 export default function ScanResultsPage() {
   const { scanId } = useParams<{ scanId: string }>();
   const navigate = useNavigate();
-  const [scanDetail, setScanDetail] = useState<ScanDetail | null>(null);
-  const [healthReport, setHealthReport] = useState<HealthReportResponse | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<PlantAnalysisResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDiseaseRegions, setShowDiseaseRegions] = useState(true);
+  const [showGradCAM, setShowGradCAM] = useState(false);
 
   useEffect(() => {
-    const fetchScanData = async () => {
+    const fetchAnalysisData = async () => {
       setIsLoading(true);
       setError(null);
 
       try {
-        // Fetch detailed scan results
-        const detail = await scanApi.getScanDetails(scanId);
-        setScanDetail(detail);
-
-        // Fetch formatted health report
-        const report = await scanApi.getScanReport(scanId);
-        setHealthReport(report);
+        // Fetch detailed analysis results
+        const result = await analysisApi.getAnalysis(scanId);
+        setAnalysisResult(result);
       } catch (err: any) {
-        setError(err.message || "Failed to load scan results");
-        toast.error("Error loading scan results: " + err.message);
+        setError(err.message || "Failed to load analysis results");
+        toast.error("Error loading analysis results: " + err.message);
       } finally {
         setIsLoading(false);
       }
     };
 
     if (scanId) {
-      fetchScanData();
+      fetchAnalysisData();
     }
   }, [scanId, navigate]);
 
@@ -54,7 +52,7 @@ export default function ScanResultsPage() {
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-center">
           <Loader size={32} className="mb-4" />
-          <h2 className="text-xl font-semibold">Loading scan results...</h2>
+          <h2 className="text-xl font-semibold">Loading analysis results...</h2>
         </div>
       </div>
     );
@@ -75,7 +73,7 @@ export default function ScanResultsPage() {
     );
   }
 
-  if (!scanDetail || !healthReport) {
+  if (!analysisResult) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-center">
@@ -92,10 +90,10 @@ export default function ScanResultsPage() {
       <div className="flex flex-col items-center justify-center text-center">
         <div className="flex items-center justify-circle space-x-3">
           <CheckCircle size={24} className="text-success" />
-          <h2 className="text-2xl font-semibold tracking-[-0.05em]">Scan Complete</h2>
+          <h2 className="text-2xl font-semibold tracking-[-0.05em]">Analysis Complete</h2>
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
-          Analysis of plant scan #{scanId.substring(0, 8)}
+          Analysis of plant scan #{analysisResult.analysis_id.substring(0, 8)}
         </p>
       </div>
 
@@ -116,12 +114,12 @@ export default function ScanResultsPage() {
                   strokeLinecap="round"
                   strokeWidth={8}
                   strokeDasharray={314}
-                  strokeDashoffset={314 * (1 - healthReport.overall_health_score / 100)}
+                  strokeDashoffset={314 * (1 - analysisResult.plant_health_summary.overall_health_score / 100)}
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-3xl font-bold tracking-[-0.06em] text-foreground">
-                  {Math.round(healthReport.overall_health_score)}
+                  {Math.round(analysisResult.plant_health_summary.overall_health_score)}
                 </span>
                 <span className="text-[10px] font-medium text-muted-foreground">/ 100</span>
               </div>
@@ -137,22 +135,22 @@ export default function ScanResultsPage() {
           <div className="flex items-start justify-between space-x-3">
             <div className="flex items-center gap-2">
               <div className={`grid size-5 place-items-center rounded-xl ${
-                healthReport.health_status === "excellent"
+                analysisResult.plant_health_summary.health_status === "excellent"
                   ? "bg-[hsl(var(--success)/.20)] text-[hsl(var(--success))]"
-                  : healthReport.health_status === "good"
+                  : analysisResult.plant_health_summary.health_status === "good"
                   ? "bg-[hsl(var(--success)/.12)] text-[hsl(var(--success))]"
-                  : healthReport.health_status === "fair"
+                  : analysisResult.plant_health_summary.health_status === "fair"
                   ? "bg-[hsl(var(--warning)/.12)] text-[hsl(var(--warning))]"
-                  : healthReport.health_status === "poor"
+                  : analysisResult.plant_health_summary.health_status === "poor"
                   ? "bg-[hsl(var(--destructive)/.12)] text-[hsl(var(--destructive))]"
                   : "bg-[hsl(var(--muted)/.12)] text-[hsl(var(--muted))]"
               }">
-                {healthReport.health_status.charAt(0).toUpperCase() + healthReport.health_status.slice(1)}
+                {analysisResult.plant_health_summary.health_status.charAt(0).toUpperCase() + analysisResult.plant_health_summary.health_status.slice(1)}
               </div>
               <div>
-                <h3 className="text-lg font-semibold">{healthReport.health_status.charAt(0).toUpperCase() + healthReport.health_status.slice(1)} Health</h3>
+                <h3 className="text-lg font-semibold">{analysisResult.plant_health_summary.health_status.charAt(0).toUpperCase() + analysisResult.plant_health_summary.health_status.slice(1)} Health</h3>
                 <p className="text-sm text-muted-foreground">
-                  Based on analysis of {scanDetail.leaf_results.length} leaves
+                  Based on analysis of {analysisResult.leaf_results.length} leaves
                 </p>
               </div>
             </div>
@@ -166,15 +164,15 @@ export default function ScanResultsPage() {
             <div className="flex items-start justify-between mb-2">
               <h3 className="text-sm font-semibold text-muted-foreground">Disease Summary</div>
               <span className="text-xs font-medium">
-                {scanDetail.leaf_results.length} leaves analyzed
+                {analysisResult.leaf_results.length} leaves analyzed
               </span>
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span>Healthy Leaves:</span>
-                <span className="font-mono">{healthReport.healthy_leaf_count}/{healthReport.total_leaf_count}</span>
+                <span className="font-mono">{analysisResult.plant_health_summary.healthy_leaf_count}/{analysisResult.plant_health_summary.total_leaf_count}</span>
               </div>
-              {Object.entries(healthReport.disease_summary).map(([disease, count]) => (
+              {Object.entries(analysisResult.plant_health_summary.disease_summary).map(([disease, count]) => (
                 disease !== "healthy" && (
                   <div key={disease} className="flex items-center justify-between text-xs">
                     <span>{disease.replace('_', ' ').toLowerCase()}:</span>
@@ -187,6 +185,39 @@ export default function ScanResultsPage() {
         </div>
       </div>
 
+      {/* Leaf Analysis */}
+      <div className="space-y-4">
+        <div className="flex items-start justify-between">
+          <h3 className="text-[16px] font-semibold tracking-[-0.02em]">Leaf Analysis</h3>
+          <div className="flex items-start justify-between space-x-2">
+            <Label htmlShowDiseaseRegions>Show Disease Regions</Label>
+            <input
+              type="checkbox"
+              checked={showDiseaseRegions}
+              onChange={(e) => setShowDiseaseRegions(e.target.checked)}
+              className="h-4 w-4 rounded border-primary focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <Label htmlShowGradCAM>Show Grad-CAM Explanation</Label>
+            <input
+              type="checkbox"
+              checked={showGradCAM}
+              onChange={(e) => setShowGradCAM(e.target.checked)}
+              className="h-4 w-4 rounded border-primary focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+        </div>
+
+        {/* Placeholder for actual image - in a real app, we would get this from the backend */}
+        <div className="border border-border/80 rounded-xl p-4">
+          <LeafOverlay
+            imageUrl="https://images.unsplash.com/photo-1501004318641-b39e6451bec6?auto=format&fit=crop&w=800&q=80" // Placeholder
+            leafResults={analysisResult.leaf_results}
+            showDiseaseRegions={showDiseaseRegions}
+            showGradCAM={showGradCAM}
+          />
+        </div>
+      </div>
+
       {/* Leaf Analysis Details */}
       <div className="space-y-4">
         <div className="flex items-start justify-between">
@@ -196,7 +227,7 @@ export default function ScanResultsPage() {
           </Button>
         </div>
 
-        {scanDetail.leaf_results.map((leaf, index) => (
+        {analysisResult.leaf_results.map((leaf, index) => (
           <div key={leaf.leaf_index} className="border border-border/80 rounded-xl p-4">
             <div className="flex items-start justify-between mb-2">
               <div className="flex items-center gap-2">

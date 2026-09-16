@@ -1,20 +1,20 @@
 # PlantGuard AI Architecture
 
 ## High-Level Architecture
-PlantGuard AI follows a three-tier architecture:
+PlantGuard AI follows a service-oriented architecture with clean separation of concerns:
 1. **Frontend (Client)**: React/Vite application for user interface
-2. **Backend (Server)**: Express.js API server
-3. **Machine Learning Model**: TensorFlow/Keras model for plant disease classification
+2. **Backend (Server)**: FastAPI API server with isolated ML service layer
+3. **Machine Learning Services**: Isolated service interfaces for ML components (to be implemented independently)
 
 ## Component Diagram
 ```
 +------------------+     +------------------+     +---------------------+
-|   Frontend App   |<--->|   API Server     |<--->|   ML Model Service  |
-|  (React/Vite)    |     |  (Express.js)    |     |  (TensorFlow Serving)|
+|   Frontend App   |<--->|   API Server     |<--->|   ML Service Layer  |
+|  (React/Vite)    |     |  (FastAPI)       |     |  (Isolated Services)|
 +------------------+     +------------------+     +---------------------+
         ^                         ^                         ^
         |                         |                         |
-        |        HTTP/JSON        |        gRPC/REST        |
+        |        HTTP/JSON        |        HTTP/JSON        |
         |                         |                         |
 +------------------+     +------------------+     +---------------------+
 |   Web Browser    |     |   Server (VPS)   |     |   ML Inference    |

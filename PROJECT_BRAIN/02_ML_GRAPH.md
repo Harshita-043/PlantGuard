@@ -1,125 +1,170 @@
 # PlantGuard AI Machine Learning Graph
 
 ## Overview
-The ML component of PlantGuard AI uses a TensorFlow/Keras EfficientNetV2-B0 model for plant disease classification. The model was trained on the PlantVillage dataset to classify 38 different plant disease states across multiple crop types.
+The ML component of PlantGuard AI uses a service-oriented architecture with clearly defined interfaces for each stage of the plant health analysis pipeline. This design allows for independent development and seamless integration of ML models developed separately.
 
-## Model Architecture
+## ML Service Architecture
+PlantGuard AI implements a pipeline of isolated ML services, each responsible for a specific stage of plant health analysis:
 
-### Base Model
-- **Architecture**: EfficientNetV2-B0
-- **Input Shape**: (224, 224, 3) RGB images
-- **Pretrained Weights**: ImageNet
-- **Feature Extraction**: Transfer learning approach
+1. **Leaf Segmentation Service** - Segments individual leaves from whole plant images
+2. **Disease Classification Service** - Classifies disease type for each leaf
+3. **Disease Segmentation Service** - Segments diseased regions within each leaf
+4. **Severity Service** - Calculates disease severity metrics
+5. **Explainability Service** - Generates Grad-CAM visualizations for model predictions
+6. **Video Tracking Service** - Tracks leaves across video frames (for video analysis)
+7. **Plant Aggregator Service** - Aggregates leaf-level results into plant-level assessment
+8. **Plant Analysis Service** - Orchestrates the complete ML pipeline
 
-### Custom Layers
-1. **Base Model**: EfficientNetV2-B0 (include_top=False, weights='imagenet')
-2. **Global Average Pooling**: Reduces spatial dimensions
-3. **Dropout**: 0.2 rate for regularization
-4. **Dense Layer**: 128 units with ReLU activation
-5. **Dropout**: 0.2 rate for regularization
-6. **Output Layer**: 38 units with softmax activation (one per class)
+## Pipeline Flow
+```
+Whole Plant Image / Video
+        ↓
+Leaf Segmentation Service
+        ↓
+Multiple Leaf Objects (N leaves, dynamic count)
+        ↓
+For each leaf [0..N-1]:
+        ↓
+Disease Classification Service
+        ↓
+Disease Segmentation Service
+        ↓
+Severity Service
+        ↓
+Explainability Service
+        ↓
+Per-Leaf Result
+        ↓
+Plant Aggregator Service
+        ↓
+Plant-Level Aggregation
+        ↓
+Plant Health Report
+        ↓
+Care Recommendations
+```
 
-## Training Process
+## Service Interfaces (Contracts)
+Each service implements a clearly defined interface with specific input/output contracts:
 
-### Dataset
-- **Source**: PlantVillage dataset
-- **Classes**: 38 plant disease/health combinations
-- **Split**: 
-  - Training: ~70%
-  - Validation: ~20% 
-  - Test: ~10%
-- **Preprocessing**: 
-  - Resize to 224x224
-  - EfficientNetV2 built-in preprocessing (rescaling)
-  - Data augmentation (likely applied during training)
+### LeafSegmentationService
+- **Input**: RGB numpy array (H, W, 3)
+- **Output**: List of detections with:
+  - `bbox`: [x_min, y_min, width, height] (normalized 0-1)
+  - `mask`: Optional segmentation mask (boolean numpy array H, W)
+  - `confidence`: Detection confidence score (0-1)
 
-### Training Phases
-1. **Head Training**: Train only the custom top layers while freezing base model
-   - Initial learning rate: 0.001
-   - Duration: 10 epochs
-   - Results: Good convergence, validation accuracy ~94.3%
+### DiseaseClassificationService
+- **Input**: RGB leaf image numpy array (H, W, 3)
+- **Output**: Dict with:
+  - `disease_class`: String identifier (e.g., "healthy", "leaf_spot")
+  - `confidence`: Confidence score (0-1)
+  - `all_probabilities`: Optional dict of all class probabilities
 
-2. **Fine Tuning**: Unfreeze some base model layers and train with lower learning rate
-   - Learning rate: 0.00001 (1/100th of initial)
-   - Duration: 10 epochs
-   - Results: Improved validation accuracy ~96.0%
+### DiseaseSegmentationService
+- **Input**: RGB leaf image numpy array (H, W, 3)
+- **Output**: Dict with:
+  - `mask`: Segmentation mask (boolean numpy array H, W)
+  - `diseased_area_ratio`: Ratio of diseased pixels (0-1)
+  - `bounding_box`: Optional [x_min, y_min, width, height] (normalized)
 
-## Model Performance
+### SeverityService
+- **Input**: Leaf RGB numpy array (H, W, 3), disease mask (boolean numpy array H, W)
+- **Output**: Dict with:
+  - `severity_score`: Overall severity (0-1)
+  - `affected_percentage`: Percentage affected (0-100)
+  - `severity_level`: Categorical level (low, medium, high)
+  - `metrics`: Additional severity metrics (optional)
 
-### Final Metrics (from model_metadata.json)
-- **Test Accuracy**: 95.94%
-- **Test Loss**: 0.1199
-- **Framework**: TensorFlow/Keras
-- **Seed**: 42 (for reproducibility)
+### ExplainabilityService
+- **Input**: Leaf RGB numpy array (H, W, 3), disease class (string)
+- **Output**: Dict with:
+  - `heatmap`: Normalized heatmap (0-1)
+  - `overlay`: Optional RGB overlay visualization
+  - `activation_map`: Optional raw activation values
 
-### Training History Insights
-From training_history.json:
-- **Head Training**: 
-  - Training accuracy improved from 79.5% to 95.2%
-  - Validation accuracy improved from 41.9% to 94.3%
-  - Some overfitting observed in later epochs (validation accuracy plateaued)
+### VideoTrackingService
+- **Input**: Previous leaf detections, current video frame (H, W, 3)
+- **Output**: List of tracked leaf detections with updated bboxes, masks, confidences, leaf_ids
 
-- **Fine Tuning**:
-  - Training accuracy improved from 95.4% to 97.2%
-  - Validation accuracy improved from 94.4% to 96.0%
-  - Better generalization with lower learning rate
+### PlantAggregatorService
+- **Input**: List of LeafResult objects
+- **Output**: PlantHealthSummary with:
+  - `overall_health_score`: Overall plant health (0-100)
+  - `health_status`: Overall status (excellent, good, fair, poor, critical)
+  - `healthy_leaf_count`: Number of healthy leaves
+  - `total_leaf_count`: Total leaves analyzed
+  - `disease_summary`: Disease distribution counts
+  - `risk_assessment`: Overall risk level (low, medium, high)
+  - `recommendations`: List of care recommendations
 
-## Model Classes (38 total)
-The model classifies the following plant disease states:
-- Apple: Apple scab, Black rot, Cedar apple rust, Healthy
-- Blueberry: Healthy
-- Cherry: Powdery mildew, Healthy
-- Corn: Cercospora leaf spot/Gray leaf spot, Common rust, Northern Leaf Blight, Healthy
-- Grape: Black rot, Esca (Black Measles), Leaf blight, Healthy
-- Orange: Huanglongbing (Citrus greening)
-- Pepper: Bacterial spot, Healthy
-- Potato: Early blight, Late blight, Healthy
-- Raspberry: Healthy
-- Soybean: Healthy
-- Squash: Powdery mildew
-- Strawberry: Leaf scorch, Healthy
-- Tomato: Bacterial spot, Early blight, Late blight, Leaf Mold, Septoria leaf spot, Spider mites, Target spot, Tomato Yellow Leaf Curl Virus, Tomato mosaic virus, Healthy
+### PlantAnalysisService
+- **Input**: RGB image/frame (H, W, 3), optional analysis ID
+- **Output**: PlantAnalysisResponse with complete analysis results
 
-## Model Artifacts
-Located in `ml/models/classification/`:
-- `plantguard_classifier.keras` - Final trained model
-- `plantguard_classifier_best.keras` - Best checkpoint during training
-- `model_metadata.json` - Model metadata and metrics
-- `class_names.json` - Ordered list of class names
-- `training_history.json` - Detailed training metrics per epoch
-- `confusion_matrix.png` - Visualization of model performance
-- `classification_report.txt` - Precision, recall, F1-score per class
+## Implementation Details
+- **Service Location**: `backend/app/services/`
+- **Interfaces**: `backend/app/services/interfaces/` (abstract base classes)
+- **Mock Implementations**: `backend/app/services/mock/` (for development/testing)
+- **Service Factory**: `backend/app/services/plant_analysis_service.py` (creates appropriate services based on ML_MODE)
+- **Configuration**: `backend/app/core/config.py` (ML_MODE=mock/real, ML_MODEL_PATH)
 
-## Preprocessing Pipeline
-1. **Input**: Raw image (any format, any size)
-2. **Resize**: To 224x224 pixels (maintaining aspect ratio likely with padding/cropping)
-3. **Color Space**: RGB (3 channels)
-4. **Normalization**: EfficientNetV2 built-in preprocessing (specific to ImageNet pretraining)
-5. **Output**: Normalized tensor ready for model input
-
-## Current Limitations
-1. **No Serving Infrastructure**: Model stored as Keras files, not deployed for inference
-2. **Missing API Endpoint**: No backend route to accept images and return predictions
-3. **No Input Validation**: No verification of image format/size before processing
-4. **No Batch Processing**: Designed for single-image inference
-5. **No Confidence Thresholding**: Returns raw probabilities without uncertainty quantification
-6. **No Model Monitoring**: No drift detection or performance tracking in production
+## Current Limitations (Development Stage)
+1. **Mock Implementations**: Currently using mock services for development/testing
+2. **Real Service Implementations**: To be created when ML models are available
+3. **Model Artifacts**: To be placed in `ml-models/` directory structure
+4. **Production Deployment**: Infrastructure setup pending
 
 ## Dependencies
-- TensorFlow (version unspecified, but compatible with Keras .keras format)
-- NumPy (for array operations)
-- PIL/Pillow (likely used for image loading/preprocessing in application code)
+- NumPy (for array operations in service interfaces)
+- Pydantic (for data validation and contracts)
+- Optional ML framework dependencies (to be implemented in real services)
 
-## Integration Points Needed
-1. **Backend API Endpoint**: `/api/scan` or similar to accept plant images
-2. **Image Preprocessing Service**: To prepare images for model input
-3. **Model Loading Service**: To load Keras model and perform inference
-4. **Result Formatting**: To convert model outputs to user-friendly responses
-5. **Error Handling**: For invalid images, model failures, etc.
+## Integration Points
+- **Backend API**: `POST /api/v1/analyze/image` and `POST /api/v1/analyze/video`
+- **Service Orchestration**: Handled by PlantAnalysisService
+- **Data Transfer**: Standardized contracts between services
+- **Model Storage**: `ml-models/{service_type}/` directory structure
 
 ## Future Improvements
-1. **Model Optimization**: Convert to TensorFlow Lite or TensorFlow.js for edge deployment
-2. **Ensemble Methods**: Combine with other architectures for improved robustness
-3. **Continuous Learning**: Pipeline for retraining with new data
-4. **Explainability**: Grad-CAM or similar to show which image regions influenced decisions
-5. **Uncertainty Estimation**: Bayesian approaches or Monte Carlo dropout for confidence scores
+1. **Real Service Implementations**: Replace mock services with actual ML model implementations
+2. **Model Optimization**: GPU acceleration, batch processing, model quantization
+3. **Continuous Learning**: Pipeline for retraining with new field data
+4. **Advanced Explainability**: Enhanced Grad-CAM or alternative techniques
+5. **Uncertainty Estimation**: Bayesian approaches or ensemble methods for confidence scores
+6. **Model Monitoring**: Performance tracking, drift detection, A/B testing
+7. **Ensemble Methods**: Combine multiple models for improved robustness
+8. **Edge Deployment**: TensorFlow Lite, TensorFlow.js, or ONNX conversion for deployment flexibility
+
+## Model Artifacts Storage
+When ML models are available, they should be stored in:
+```
+ml-models/
+├── leaf_segmentation/
+│   ├── model.pth or .h5 or .pb
+│   └── config.yaml
+├── disease_classification/
+│   ├── model.pth or .h5 or .pb
+│   └── class_names.txt
+├── disease_segmentation/
+│   ├── model.pth or .h5 or .pb
+│   └── config.yaml
+├── severity/
+│   └── model.pth or .h5 or .pb
+├── explainability/
+│   └── model.pth or .h5 or .pb
+├── video_tracking/
+│   └── model.pth or .h5 or .pb
+└── plant_aggregator/
+    └── model.pth or .h5 or .pb
+```
+
+## Integration Readiness
+The architecture is designed for seamless integration of independently-developed ML models:
+- **Zero Frontend Changes**: Frontend consumes only standardized API responses
+- **Zero Backend Contract Changes**: API endpoints remain stable regardless of ML model source
+- **True Separation of Concerns**: ML logic isolated in `backend/app/services/`
+- **Environment-Based Configuration**: Simple toggle via `ML_MODE=mock` or `ML_MODE=real`
+- **Well-Defined Contracts**: Clear input/output specifications for all ML services
+- **Dynamic Leaf Handling**: Supports arbitrary number of detected leaves (no hard-coded limits)
+- **Framework Agnostic**: Compatible with TensorFlow, PyTorch, JAX, or any other ML framework

@@ -10,6 +10,7 @@ import logging
 
 # Import API routers
 from app.api import scans, health
+from app.api.v1 import analyze
 from app.core.database import create_tables
 
 # Configure logging
@@ -52,6 +53,7 @@ app.add_middleware(
 # Include API routers
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(scans.router, prefix="/api", tags=["scans"])
+app.include_router(analyze.router, prefix="/api/v1", tags=["analysis"])
 
 
 @app.get("/")
