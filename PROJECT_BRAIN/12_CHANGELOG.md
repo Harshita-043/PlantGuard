@@ -14,6 +14,34 @@
 ### Fixed
 - N/A (initial release)
 
+## [0.3.0] - 2026-09-23
+### Added
+- Whole-Plant Image Analysis workflow (Phase 5)
+- Complete image upload with validation (file type and size)
+- Upload progress simulation
+- Analysis loading states (isProcessing, isAnalyzing)
+- Processing state visualization
+- Success state (shows results before redirecting)
+- Failure state (error handling and display)
+- Retry functionality
+- Results navigation to scan details page
+- Workflow steps visualization showing progress through analysis pipeline
+- Support for common image formats (JPEG, PNG)
+- Uses backend's existing upload architecture (analysisApi.analyzeImage endpoint)
+- Does not implement video in this phase (focused on image analysis only)
+- Does not implement real ML models (uses mock services)
+- Handles empty/no-leaf state (handled in results page)
+- Handles low-quality image state (detected by backend and returned as error)
+- LeafOverlay component for visualizing leaf bounding boxes, disease regions, and Grad-CAM
+
+### Changed
+- Enhanced ScanPage.tsx to implement complete Whole-Plant Image Analysis workflow
+- Enhanced ScanResultsPage.tsx to work with the new analysis flow
+- Updated LeafOverlay.tsx to support disease region and Grad-CAM visualization toggles
+
+### Fixed
+- None
+
 ## [0.2.0] - 2026-09-16
 ### Added
 - Service-oriented ML architecture with clearly defined interfaces for 7 ML stages

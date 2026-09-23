@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Leaf, AlertTriangle, CheckCircle, Loader, RefreshCw, TrendingUp, FileText, Settings, CircleHelp } from "lucide-react";
+import { Leaf, AlertTriangle, CheckCircle, Loader, RefreshCw, TrendingUp, FileText, Settings, CircleHelp, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";

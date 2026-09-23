@@ -40,6 +40,19 @@ class Settings(BaseSettings):
     UPLOAD_FOLDER: str = "./uploads"
     ALLOWED_IMAGE_TYPES: List[str] = ["image/jpeg", "image/png", "image/jpg"]
 
+    # Object Storage Settings
+    STORAGE_PROVIDER: str = "mock"  # "mock", "s3", "minio", etc.
+    STORAGE_BUCKET: str = "plantguard-ai"  # Bucket/container name
+    STORAGE_REGION: str = "us-east-1"  # Storage region
+    STORAGE_ENDPOINT: str = ""  # Custom endpoint (for MinIO, etc.) - empty for AWS
+    STORAGE_ACCESS_KEY: str = ""  # Access key (empty for mock/IAM roles)
+    STORAGE_SECRET_KEY: str = ""  # Secret key (empty for mock/IAM roles)
+    STORAGE_PRESIGNED_URL_EXPIRY: int = 3600  # Expiry time for signed URLs (seconds)
+    MAX_IMAGE_SIZE: int = 10 * 1024 * 1024  # 10 MB
+    MAX_VIDEO_SIZE: int = 50 * 1024 * 1024  # 50 MB
+    ALLOWED_IMAGE_TYPES: List[str] = ["image/jpeg", "image/png", "image/webp"]
+    ALLOWED_VIDEO_TYPES: List[str] = ["video/mp4", "video/quicktime", "video/x-msvideo"]
+
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = ["*"]
 

@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Loader } from "lucide-react";
+import { LeafResult } from "@/shared/api";
 
 interface LeafOverlayProps {
   imageUrl: string;
-  leafResults: any[]; // LeafResult[]
+  leafResults: LeafResult[];
   showDiseaseRegions: boolean;
   showGradCAM: boolean;
 }
