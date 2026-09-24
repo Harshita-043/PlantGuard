@@ -1,45 +1,16 @@
-# PlantGuard AI - Project Brain Master Document
+# PlantGuard AI — Project Overview
 
-## Overview
-PlantGuard AI is a plant health monitoring application that uses AI to scan and diagnose plant diseases. The application consists of a React/Vite frontend with Express.js backend and a TensorFlow/Keras ML model for plant disease classification.
+PlantGuard AI is currently a React/Vite frontend and FastAPI backend shell. It does not currently provide real plant diagnosis, authentication, user/plant/scan persistence, object storage, or an active LLM workflow.
 
-## Project Structure
-```
-PLANTGUARD AI/
-├── PROJECT_BRAIN/              # Single source of truth documentation
-├── frontend/                   # React/Vite application
-│   ├── client/                 # Client-side React components
-│   ├── server/                 # Express.js backend
-│   ├── shared/                 # Shared types and utilities
-│   └── public/                 # Static assets
-└── ml/                         # Machine learning components
-    └── models/                 # Trained ML models
-        └── classification/     # Plant disease classification model
-```
+The root `ml/` directory contains model artifacts. Their inference integration with the application is **NOT VERIFIED**; application code must not claim or fabricate ML results.
 
-## Current Status
-- **Frontend**: Fully functional React application with UI components
-- **Backend**: Express.js API server with basic routes
-- **ML Model**: Trained EfficientNetV2-B0 model for plant disease classification (38 classes)
-- **Integration**: Missing API endpoints to connect frontend with ML model
+## Source of truth
 
-## Key Components Documented
-1. [ARCHITECTURE.md](01_ARCHITECTURE.md) - System architecture overview
-2. [ML_GRAPH.md](02_ML_GRAPH.md) - Machine learning pipeline and model details
-3. [DATASETS.md](03_DATASETS.md) - Training and evaluation datasets
-4. [MODEL_REGISTRY.md](04_MODEL_REGISTRY.md) - Model artifacts and metadata
-5. [API_CONTRACTS.md](05_API_CONTRACTS.md) - API endpoints and contracts
-6. [RAG_GRAPH.md](06_RAG_GRAPH.md) - Retrieval-Augmented Generation components
-7. [AGENT_GRAPH.md](07_AGENT_GRAPH.md) - AI agent workflows
-8. [FRONTEND_GRAPH.md](08_FRONTEND_GRAPH.md) - Frontend component structure
-9. [DEPENDENCIES.md](09_DEPENDENCIES.md) - Project dependencies
-10. [DECISIONS.md](10_DECISIONS.md) - Technical decisions made
-11. [AUDIT.md](11_AUDIT.md) - This audit document
-12. [CHANGELOG.md](12_CHANGELOG.md) - Project changes over time
-13. [PROJECT_GRAPH.md](PROJECT_GRAPH.md) - Overall project dependency graph
+- [01_ARCHITECTURE.md](01_ARCHITECTURE.md): verified application architecture
+- [05_API_CONTRACTS.md](05_API_CONTRACTS.md): actual current HTTP routes and unavailable operations
+- [07_AGENT_GRAPH.md](07_AGENT_GRAPH.md): partial agentic implementation state
+- [11_AUDIT.md](11_AUDIT.md): audit findings, changes, test limitations, blockers
+- [12_CHANGELOG.md](12_CHANGELOG.md): dated change history and audit correction
+- [MANUAL_SETUP.md](../MANUAL_SETUP.md): single local/manual setup guide
 
-## Next Steps
-1. Complete API contract documentation
-2. Define ML serving strategy
-3. Plan frontend-ML integration
-4. Identify missing components for production readiness
+Other graph documents describe research or future scope only where they explicitly say so. Documentation alone does not establish implementation.

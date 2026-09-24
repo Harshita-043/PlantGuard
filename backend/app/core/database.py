@@ -1,38 +1,28 @@
-"""
-Database Configuration
-"""
+"""SQLAlchemy engine, declarative base, and request-scoped sessions."""
+from collections.abc import Generator
+
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
 from app.core.config import settings
 
-# Create database engine
-engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {}
+
+class Base(DeclarativeBase):
+    """Base class for persisted application models."""
+
+
+engine: Engine | None = (
+    create_engine(settings.DATABASE_URL, pool_pre_ping=True)
+    if settings.DATABASE_URL
+    else None
 )
-
-# Create session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create base class for models
-Base = declarative_base()
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False) if engine else None
 
 
-def get_db():
-    """
-    Dependency to get database session.
-    Yields a database session and ensures it's closed after use.
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def create_tables():
-    """
-    Create all database tables.
-    """
-    Base.metadata.create_all(bind=engine)
+def get_db() -> Generator[Session, None, None]:
+    """Yield a database session or fail clearly when PostgreSQL is not configured."""
+    if SessionLocal is None:
+        raise RuntimeError("Database access is unavailable: DATABASE_URL is not configured")
+    with SessionLocal() as session:
+        yield session

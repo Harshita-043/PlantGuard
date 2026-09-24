@@ -21,14 +21,6 @@ class HealthStatus(str, Enum):
     CRITICAL = "critical"
 
 
-class PlantAnalysisRequest(BaseModel):
-    """Request for plant analysis"""
-    # For image analysis: the uploaded file
-    # For video analysis: the uploaded file
-    # Analysis type determined by endpoint
-    pass  # File handling done in route
-
-
 class LeafResult(BaseModel):
     """Result for a single leaf analysis"""
     leaf_index: int = Field(..., description="Index of the leaf in the analysis")
@@ -79,14 +71,6 @@ class PlantHealthSummary(BaseModel):
     recommendations: List[str] = Field(..., description="Care recommendations")
 
 
-class CareRecommendation(BaseModel):
-    """Single care recommendation"""
-    title: str
-    description: str
-    priority: str = Field(..., description="high, medium, low")
-    category: str = Field(..., description="watering, lighting, treatment, etc.")
-
-
 class PlantAnalysisResponse(BaseModel):
     """Complete plant analysis response"""
     analysis_id: str = Field(..., description="Unique identifier for this analysis")
@@ -95,4 +79,4 @@ class PlantAnalysisResponse(BaseModel):
     leaf_results: List[LeafResult] = Field(..., description="Results for each leaf analyzed")
     plant_health_summary: PlantHealthSummary = Field(..., description="Plant-level health summary")
     processing_time_ms: Optional[int] = Field(None, description="Processing time in milliseconds")
-    ml_mode: str = Field(..., description="ML mode used: mock or real")
+    ml_mode: str = Field(..., description="ML integration status reported by the analysis service")

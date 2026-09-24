@@ -4,8 +4,9 @@ Defines the contract for explainability services (Grad-CAM).
 """
 from abc import ABC, abstractmethod
 from typing import Dict, Any
+from .base import BaseService
 import numpy as np
-from ..schemas.plant_analysis import LeafResult
+from ...schemas.plant_analysis import LeafResult
 
 
 class ExplainabilityService(BaseService):

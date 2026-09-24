@@ -2,213 +2,155 @@
 Analysis API endpoints (v1)
 """
 import logging
-from typing import Optional, List
-from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, status
-from fastapi.responses import JSONResponse
+import os
+import tempfile
+import warnings
+from typing import List
+from fastapi import APIRouter, File, UploadFile, HTTPException, status
 import numpy as np
-from PIL import Image
-import io
+from PIL import Image, UnidentifiedImageError
 import uuid
-from datetime import datetime
 
-from app.schemas.plant_analysis import (
-    PlantAnalysisResponse, PlantAnalysisRequest,
-    LeafResult, PlantHealthSummary
-)
-from app.services.plant_analysis_service import create_plant_analysis_service
+from app.schemas.plant_analysis import PlantAnalysisResponse
+from app.services.plant_analysis_service import create_plant_analysis_service, MLCapabilityUnavailable
 from app.services.interfaces.plant_analysis import PlantAnalysisService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Dependency to get plant analysis service
-def get_plant_analysis_service() -> PlantAnalysisService:
-    return create_plant_analysis_service()
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+SUPPORTED_IMAGE_TYPES = {
+    "image/jpeg": "JPEG",
+    "image/png": "PNG",
+    "image/webp": "WEBP",
+}
 
 
 @router.post("/analyze/image", response_model=PlantAnalysisResponse)
 async def analyze_image(
     file: UploadFile = File(...),
-    plant_analysis_service: PlantAnalysisService = Depends(get_plant_analysis_service)
 ):
-    """
-    Analyze a plant image for health assessment
-    """
-    # Validate file type
-    if not file.content_type or not file.content_type.startswith('image/'):
+    """Validate an image in temporary storage, then attempt real analysis."""
+    if file is None:  # Also gives direct callers the same result as a missing multipart field.
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must be an image"
+            detail="An image file is required",
         )
-
-    # Check file size (limit to 10MB)
-    contents = await file.read()
-    if len(contents) > 10 * 1024 * 1024:  # 10 MB
+    expected_format = SUPPORTED_IMAGE_TYPES.get(file.content_type or "")
+    if expected_format is None:
+        await file.close()
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="File size too large. Maximum 10MB allowed."
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Supported image types are JPEG, PNG, and WebP",
         )
 
     try:
-        # Convert bytes to PIL Image
-        image = Image.open(io.BytesIO(contents))
+        # The client filename is deliberately ignored. Both the directory and object
+        # name are generated locally, and the TemporaryDirectory context cleans up
+        # on every return and exception path.
+        with tempfile.TemporaryDirectory(prefix="plantguard-upload-") as temporary_directory:
+            image_path = os.path.join(temporary_directory, f"{uuid.uuid4().hex}.upload")
+            size = 0
+            with open(image_path, "xb") as temporary_file:
+                while True:
+                    chunk = await file.read(min(64 * 1024, MAX_IMAGE_BYTES + 1 - size))
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MAX_IMAGE_BYTES:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail="File size too large. Maximum 10MB allowed.",
+                        )
+                    temporary_file.write(chunk)
 
-        # Convert to RGB if necessary (removes alpha channel if present)
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", Image.DecompressionBombWarning)
+                    with Image.open(image_path) as image:
+                        actual_format = image.format
+                        image.verify()
+                if actual_format != expected_format:
+                    raise HTTPException(
+                        status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                        detail="Image content does not match its declared image type",
+                    )
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", Image.DecompressionBombWarning)
+                    with Image.open(image_path) as image:
+                        image_array = np.asarray(image.convert("RGB"))
+            except (
+                UnidentifiedImageError,
+                Image.DecompressionBombError,
+                Image.DecompressionBombWarning,
+                OSError,
+                SyntaxError,
+                ValueError,
+            ) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Uploaded file is malformed or corrupted",
+                ) from exc
 
-        # Convert to numpy array
-        image_array = np.array(image)
+            try:
+                plant_analysis_service: PlantAnalysisService = create_plant_analysis_service()
+            except MLCapabilityUnavailable as exc:
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
-        logger.info(f"Processing image upload: {file.filename}, size: {len(contents)} bytes")
-
-        # Perform analysis
-        analysis_id = str(uuid.uuid4())
-        result = plant_analysis_service.analyze_image(
-            image=image_array,
-            analysis_id=analysis_id
-        )
-
-        logger.info(f"Image analysis completed: {analysis_id}")
-        return result
-
-    except Exception as e:
-        logger.error(f"Error processing image {file.filename}: {str(e)}")
+            analysis_id = str(uuid.uuid4())
+            result = plant_analysis_service.analyze_image(image=image_array, analysis_id=analysis_id)
+            logger.info("Image analysis completed: %s", analysis_id)
+            return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Unexpected error processing an uploaded image")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing image: {str(e)}"
-        )
+            detail="Image processing failed",
+        ) from exc
+    finally:
+        await file.close()
 
 
 @router.post("/analyze/video", response_model=PlantAnalysisResponse)
 async def analyze_video(
     file: UploadFile = File(...),
-    plant_analysis_service: PlantAnalysisService = Depends(get_plant_analysis_service)
 ):
-    """
-    Analyze a plant video frame for health assessment
-    (Currently processes first frame only - video tracking to be implemented)
-    """
-    # Validate file type
-    if not file.content_type or not file.content_type.startswith('video/'):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must be a video"
-        )
-
-    # For now, we'll extract the first frame and process it as an image
-    # In a full implementation, we would process multiple frames and use tracking
-    try:
-        # Note: Actual video frame extraction would require additional libraries like opencv-python
-        # For this mock implementation, we'll treat it similar to image processing
-        # but log that we're using video-specific processing
-
-        contents = await file.read()
-        if len(contents) > 10 * 1024 * 1024:  # 10 MB
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="File size too large. Maximum 10MB allowed."
-            )
-
-        # For mock purposes, we'll process as image (first frame simulation)
-        # In reality, we'd extract a frame from the video
-        image = Image.open(io.BytesIO(contents))
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        image_array = np.array(image)
-
-        logger.info(f"Processing video upload: {file.filename}, size: {len(contents)} bytes (processing first frame)")
-
-        # Perform analysis
-        analysis_id = str(uuid.uuid4())
-        result = plant_analysis_service.analyze_video_frame(
-            frame=image_array,
-            analysis_id=analysis_id
-        )
-
-        logger.info(f"Video frame analysis completed: {analysis_id}")
-        return result
-
-    except Exception as e:
-        logger.error(f"Error processing video {file.filename}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing video: {str(e)}"
-        )
+    """Video analysis is not integrated in this repository."""
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Video analysis is not available until verified video inference is integrated",
+    )
 
 
 @router.get("/analysis/{analysis_id}", response_model=PlantAnalysisResponse)
 async def get_analysis(
     analysis_id: str,
-    plant_analysis_service: PlantAnalysisService = Depends(get_plant_analysis_service)
 ):
-    """
-    Retrieve a previous analysis by ID
-    """
-    # Check if the service has the method to get analysis by ID (mock service does)
-    if hasattr(plant_analysis_service, 'get_analysis_by_id'):
-        analysis = plant_analysis_service.get_analysis_by_id(analysis_id)
-        if analysis is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Analysis not found"
-            )
-        return analysis
-    else:
-        # Fallback for services that don't implement this method
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Analysis retrieval not yet implemented for this service type."
-        )
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Analysis retrieval is unavailable because results are not persisted",
+    )
 
 
 @router.get("/analyses", response_model=List[PlantAnalysisResponse])
 async def get_analyses(
     skip: int = 0,
     limit: int = 10,
-    plant_analysis_service: PlantAnalysisService = Depends(get_plant_analysis_service)
 ):
-    """
-    Retrieve a list of analyses with pagination
-    """
-    # Check if the service has the method to get analyses (mock service does)
-    if hasattr(plant_analysis_service, 'get_analyses'):
-        analyses = plant_analysis_service.get_analyses(skip=skip, limit=limit)
-        return analyses
-    else:
-        # Fallback for services that don't implement this method
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Analyses listing not yet implemented for this service type."
-        )
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Analysis history is unavailable because results are not persisted",
+    )
 
 
 # Health check endpoint for the analysis service
-@router.get("/health")
+@router.get("/analyze/health")
 async def analysis_health(
-    plant_analysis_service: PlantAnalysisService = Depends(get_plant_analysis_service)
 ):
-    """
-    Health check for the analysis service and its ML components
-    """
-    try:
-        is_ready = plant_analysis_service.is_ready()
-        service_name = plant_analysis_service.get_service_name()
-
-        return {
-            "status": "healthy" if is_ready else "unhealthy",
-            "service": service_name,
-            "ml_mode": getattr(plant_analysis_service, 'ml_mode', 'unknown'),
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        }
-    except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={
-                "status": "unhealthy",
-                "error": str(e),
-                "timestamp": datetime.utcnow().isoformat() + "Z"
-            }
-        )
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Plant analysis is unavailable because no ML implementation is integrated",
+    )

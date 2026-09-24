@@ -1,3 +1,0 @@
-"""
-Mock ML Models
-"""

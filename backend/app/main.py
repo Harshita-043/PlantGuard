@@ -11,7 +11,8 @@ import logging
 # Import API routers
 from app.api import scans, health
 from app.api.v1 import analyze
-from app.core.database import create_tables
+from app.api.v1 import agentic
+from app.core.config import settings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,10 +26,6 @@ async def lifespan(app: FastAPI):
     Initialize resources on startup, cleanup on shutdown.
     """
     logger.info("Starting PlantGuard AI Backend...")
-    # Initialize database
-    create_tables()
-    logger.info("Database tables created/verified")
-    # TODO: Initialize ML models, etc.
     yield
     logger.info("Shutting down PlantGuard AI Backend...")
 
@@ -44,7 +41,7 @@ app = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,6 +51,7 @@ app.add_middleware(
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(scans.router, prefix="/api", tags=["scans"])
 app.include_router(analyze.router, prefix="/api/v1", tags=["analysis"])
+app.include_router(agentic.router, prefix="/api/v1", tags=["agentic"])
 
 
 @app.get("/")

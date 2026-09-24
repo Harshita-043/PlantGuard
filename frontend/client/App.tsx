@@ -50,7 +50,7 @@ const navItems = [
 ];
 
 const secondaryItems = [
-  { label: "Profile", icon: UserRound, to: "/profile" ],
+  { label: "Profile", icon: UserRound, to: "/profile" },
   { label: "Settings", icon: Settings, to: "/settings" },
 ];
 
@@ -135,7 +135,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
       <div className={`border-t border-border/70 p-4 ${collapsed ? "flex justify-center" : ""}`}>
         <div className={`flex items-center gap-3 rounded-xl bg-muted/70 p-2.5 ${collapsed ? "w-11 justify-center" : ""}`}>
           <div className="grid size-8 shrink-0 place-items-center rounded-full bg-[hsl(var(--sage))] text-xs font-bold text-primary">SC</div>
-          {!collapsed && <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-foreground">Sarah Chen</p><p className="truncate text-[11px] text-muted-foreground">sarah@example.com</p></div>}
+          {!collapsed && <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-foreground">Guest</p><p className="truncate text-[11px] text-muted-foreground">Authentication unavailable</p></div>}
           {!collapsed && <LogOut size={16} className="text-muted-foreground" />}
         </div>
       </div>
@@ -163,7 +163,7 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 function AppHeader({ onMore }: { onMore: () => void }) {
   const location = useLocation();
   const title = titles[location.pathname] ?? (location.pathname.startsWith("/plants/") ? "Plant details" : "PlantGuard AI");
-  return <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-4 backdrop-blur-md sm:px-8 lg:px-10"><div className="flex items-center gap-3"><button onClick={onMore} className="grid size-10 place-items-center rounded-xl bg-card text-muted-foreground shadow-sm ring-1 ring-border/70 lg:hidden" aria-label="Open menu"><Menu size={19} /></button><div><p className="hidden text-[11px] font-medium text-muted-foreground sm:block">Wednesday, June 12, 2024</p><h1 className="text-[19px] font-semibold tracking-[-0.03em] text-foreground sm:text-[21px]">{title}</h1></div></div><div className="flex items-center gap-2 sm:gap-4"><button className="relative grid size-10 place-items-center rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground" aria-label="Notifications"><Bell size={19} /><span className="absolute right-2 top-2 size-1.5 rounded-full bg-[hsl(var(--destructive))] ring-2 ring-background" /></button><ThemeToggle compact /><Link to="/scan" className="hidden items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-[0_8px_18px_-12px_hsl(var(--primary))] transition hover:-translate-y-0.5 sm:flex"><ScanLine size={16} /> Scan plant</Link><Link to="/profile" className="grid size-10 place-items-center rounded-full bg-[hsl(var(--sage))] text-xs font-bold text-primary ring-2 ring-card sm:size-9">SC</Link></div></header>;
+  return <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-4 backdrop-blur-md sm:px-8 lg:px-10"><div className="flex items-center gap-3"><button onClick={onMore} className="grid size-10 place-items-center rounded-xl bg-card text-muted-foreground shadow-sm ring-1 ring-border/70 lg:hidden" aria-label="Open menu"><Menu size={19} /></button><div><p className="hidden text-[11px] font-medium text-muted-foreground sm:block">{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p><h1 className="text-[19px] font-semibold tracking-[-0.03em] text-foreground sm:text-[21px]">{title}</h1></div></div><div className="flex items-center gap-2 sm:gap-4"><ThemeToggle compact /><Link to="/scan" className="hidden items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-[0_8px_18px_-12px_hsl(var(--primary))] transition hover:-translate-y-0.5 sm:flex"><ScanLine size={16} /> Scan plant</Link><Link to="/profile" className="grid size-10 place-items-center rounded-full bg-[hsl(var(--sage))] text-xs font-bold text-primary ring-2 ring-card sm:size-9" aria-label="Profile">G</Link></div></header>;
 }
 
 function AppShell() {

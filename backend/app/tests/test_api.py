@@ -22,13 +22,11 @@ def test_demo_endpoint():
 
 
 def test_analysis_health_endpoint():
-    """Test the analysis health endpoint"""
+    """Analysis cannot claim healthy when no inference service is integrated."""
     response = client.get("/api/v1/analyze/health")
-    assert response.status_code == 200
+    assert response.status_code == 503
     data = response.json()
-    assert data["status"] == "healthy"
-    assert data["service"] == "MockPlantAnalysisService"
-    assert data["ml_mode"] == "mock"
+    assert "no ML implementation is integrated" in data["detail"]
 
 
 def test_root_endpoint():

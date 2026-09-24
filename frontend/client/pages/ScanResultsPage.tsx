@@ -4,9 +4,8 @@ import { Leaf, AlertTriangle, CheckCircle, Loader, RefreshCw, TrendingUp, FileTe
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Toaster, toast } from "@/components/ui/toaster";
+import { toast } from "@/hooks/use-toast";
 import { analysisApi, PlantAnalysisResponse, LeafResult, PlantHealthSummary } from "@/lib/api";
-import { LeafOverlay } from "@/components/scan/LeafOverlay";
 
 export default function ScanResultsPage() {
   const { scanId } = useParams<{ scanId: string }>();
@@ -14,8 +13,6 @@ export default function ScanResultsPage() {
   const [analysisResult, setAnalysisResult] = useState<PlantAnalysisResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showDiseaseRegions, setShowDiseaseRegions] = useState(true);
-  const [showGradCAM, setShowGradCAM] = useState(false);
 
   useEffect(() => {
     const fetchAnalysisData = async () => {
@@ -28,7 +25,7 @@ export default function ScanResultsPage() {
         setAnalysisResult(result);
       } catch (err: any) {
         setError(err.message || "Failed to load analysis results");
-        toast.error("Error loading analysis results: " + err.message);
+        toast({ title: "Could not load analysis results", description: err.message });
       } finally {
         setIsLoading(false);
       }
@@ -144,7 +141,7 @@ export default function ScanResultsPage() {
                   : analysisResult.plant_health_summary.health_status === "poor"
                   ? "bg-[hsl(var(--destructive)/.12)] text-[hsl(var(--destructive))]"
                   : "bg-[hsl(var(--muted)/.12)] text-[hsl(var(--muted))]"
-              }">
+              }`}>
                 {analysisResult.plant_health_summary.health_status.charAt(0).toUpperCase() + analysisResult.plant_health_summary.health_status.slice(1)}
               </div>
               <div>
@@ -162,7 +159,7 @@ export default function ScanResultsPage() {
           {/* Disease Summary */}
           <div className="border border-border/80 rounded-xl p-4">
             <div className="flex items-start justify-between mb-2">
-              <h3 className="text-sm font-semibold text-muted-foreground">Disease Summary</div>
+              <h3 className="text-sm font-semibold text-muted-foreground">Disease Summary</h3>
               <span className="text-xs font-medium">
                 {analysisResult.leaf_results.length} leaves analyzed
               </span>
@@ -185,36 +182,11 @@ export default function ScanResultsPage() {
         </div>
       </div>
 
-      {/* Leaf Analysis */}
       <div className="space-y-4">
-        <div className="flex items-start justify-between">
-          <h3 className="text-[16px] font-semibold tracking-[-0.02em]">Leaf Analysis</h3>
-          <div className="flex items-start justify-between space-x-2">
-            <Label htmlShowDiseaseRegions>Show Disease Regions</Label>
-            <input
-              type="checkbox"
-              checked={showDiseaseRegions}
-              onChange={(e) => setShowDiseaseRegions(e.target.checked)}
-              className="h-4 w-4 rounded border-primary focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-            <Label htmlShowGradCAM>Show Grad-CAM Explanation</Label>
-            <input
-              type="checkbox"
-              checked={showGradCAM}
-              onChange={(e) => setShowGradCAM(e.target.checked)}
-              className="h-4 w-4 rounded border-primary focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-          </div>
-        </div>
+        <h3 className="text-[16px] font-semibold tracking-[-0.02em]">Scan media</h3>
 
-        {/* Placeholder for actual image - in a real app, we would get this from the backend */}
-        <div className="border border-border/80 rounded-xl p-4">
-          <LeafOverlay
-            imageUrl="https://images.unsplash.com/photo-1501004318641-b39e6451bec6?auto=format&fit=crop&w=800&q=80" // Placeholder
-            leafResults={analysisResult.leaf_results}
-            showDiseaseRegions={showDiseaseRegions}
-            showGradCAM={showGradCAM}
-          />
+        <div className="rounded-xl border border-border/80 p-4 text-sm text-muted-foreground">
+          The API does not retain or return the original scan image, so image overlays are unavailable.
         </div>
       </div>
 
@@ -222,7 +194,7 @@ export default function ScanResultsPage() {
       <div className="space-y-4">
         <div className="flex items-start justify-between">
           <h3 className="text-[16px] font-semibold tracking-[-0.02em]">Leaf Analysis Details</h3>
-          <Button variant="ghost" size="icon" onClick={() => toast.info("Leaf visualization coming soon")}>
+          <Button variant="ghost" size="icon" onClick={() => toast({ title: "Leaf visualization is unavailable" })}>
             <Settings size={20} />
           </Button>
         </div>
@@ -249,13 +221,18 @@ export default function ScanResultsPage() {
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground">Severity</p>
                 <div className="flex items-center gap-2">
-                  <div className={`h-2 w-[${leaf.severity_score * 100}%] rounded-full bg-${
-                    leaf.severity_level === "low"
-                      ? "var(--success)"
-                      : leaf.severity_level === "medium"
-                      ? "var(--warning)"
-                      : "var(--destructive)"
-                  }` />
+                  <div
+                    className="h-2 rounded-full"
+                    style={{
+                      width: leaf.severity_score * 100 + "%",
+                      backgroundColor:
+                        leaf.severity_level === "low"
+                          ? "var(--success)"
+                          : leaf.severity_level === "medium"
+                            ? "var(--warning)"
+                            : "var(--destructive)",
+                    }}
+                  />
                   <span className="text-xs">{Math.round(leaf.severity_score * 100)}%</span>
                 </div>
                 <p className="text-xs text-muted-foreground">{leaf.severity_level} severity</p>
