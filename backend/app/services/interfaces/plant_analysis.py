@@ -4,8 +4,9 @@ Defines the contract for the plant analysis service that orchestrates the pipeli
 """
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
+from .base import BaseService
 import numpy as np
-from ..schemas.plant_analysis import PlantAnalysisRequest, PlantAnalysisResponse
+from ...schemas.plant_analysis import PlantAnalysisResponse
 
 
 class PlantAnalysisService(BaseService):

@@ -4,8 +4,10 @@ Defines the contract for leaf segmentation services.
 """
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
+from .base import BaseService
+from .base import BaseService
 import numpy as np
-from ..schemas.plant_analysis import LeafResult
+from ...schemas.plant_analysis import LeafResult
 
 
 class LeafSegmentationService(BaseService):

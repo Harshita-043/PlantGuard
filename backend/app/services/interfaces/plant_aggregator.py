@@ -4,7 +4,8 @@ Defines the contract for plant aggregation services.
 """
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
-from ..schemas.plant_analysis import LeafResult, PlantHealthSummary
+from .base import BaseService
+from ...schemas.plant_analysis import LeafResult, PlantHealthSummary
 
 
 class PlantAggregatorService(BaseService):

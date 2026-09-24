@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Toaster, toast } from "@/components/ui/toaster";
+import { toast } from "@/hooks/use-toast";
 import { analysisApi, PlantAnalysisResponse, LeafResult, PlantHealthSummary } from "@/lib/api";
 
 export default function ScanPage() {
@@ -24,12 +24,12 @@ export default function ScanPage() {
     if (file) {
       // Validate file type
       if (!file.type.startsWith('image/')) {
-        toast.error("Please upload an image file");
+        toast({ title: "Please upload an image file" });
         return;
       }
       // Validate file size (10MB limit)
       if (file.size > 10 * 1024 * 1024) {
-        toast.error("File size too large. Maximum 10MB allowed.");
+        toast({ title: "File size too large. Maximum 10MB allowed." });
         return;
       }
       setImageFile(file);
@@ -41,7 +41,7 @@ export default function ScanPage() {
 
   const handleScanClick = useCallback(async () => {
     if (!imageFile) {
-      toast.error("Please select an image to scan");
+      toast({ title: "Please select an image to scan" });
       return;
     }
 
@@ -52,14 +52,8 @@ export default function ScanPage() {
     setWorkflowStep(1);
 
     try {
-      // Simulate upload progress (in a real app, we'd use actual upload progress events)
-      const progressInterval = setInterval(() => {
-        setUploadProgress(prev => Math.min(prev + 10, 90));
-      }, 100);
-
       const response = await analysisApi.analyzeImage(imageFile);
 
-      clearInterval(progressInterval);
       setUploadProgress(100);
       setWorkflowStep(8); // Complete
 
@@ -76,7 +70,7 @@ export default function ScanPage() {
       setIsAnalyzing(false);
       setWorkflowStep(0);
       setError(err.message || "An error occurred during analysis");
-      toast.error("Analysis failed: " + err.message);
+      toast({ title: "Analysis failed", description: err.message });
     }
   }, [imageFile, navigate, analysisApi]);
 
@@ -110,7 +104,7 @@ export default function ScanPage() {
                 : analysisResult.plant_health_summary.health_status === "poor"
                 ? "bg-[hsl(var(--destructive)/.12)] text-[hsl(var(--destructive))]"
                 : "bg-[hsl(var(--muted)/.12)] text-[hsl(var(--muted))]"
-              }">
+              }`}>
                 {analysisResult.plant_health_summary.health_status.charAt(0).toUpperCase() + analysisResult.plant_health_summary.health_status.slice(1)}
               </div>
               <div className="text-center">
@@ -124,11 +118,7 @@ export default function ScanPage() {
           <p className="text-center text-sm text-muted-foreground">
             Analyzed {analysisResult.leaf_results.length} leaf{analysisResult.leaf_results.length !== 1 ? 's' : ''}
           </p>
-          <p className="text-center text-sm text-muted-foreground">
-            {analysisResult.ml_mode === "mock"
-              ? "(Using mock ML models for development)"
-              : "(Using real ML models)"}
-          </p>
+          <p className="text-center text-sm text-muted-foreground">Analysis status: {analysisResult.ml_mode}</p>
         </div>
         <p className="text-muted-foreground">
           Your plant analysis has been processed. Redirecting to results...
@@ -199,7 +189,7 @@ export default function ScanPage() {
             {uploadProgress > 0 && uploadProgress < 100 && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="w-full h-4 bg-[hsl(var(--background))] rounded-full">
-                  <div className={`h-4 bg-[hsl(var(--primary))] rounded-full` style={{ width: uploadProgress + '%' }}></div>
+                  <div className="h-4 rounded-full bg-[hsl(var(--primary))]" style={{ width: uploadProgress + "%" }}></div>
                 </div>
                 <div className="text-center text-xs mt-1">Uploading... {uploadProgress}%</div>
               </div>
@@ -291,7 +281,7 @@ export default function ScanPage() {
             </div>
             <div className="flex items-start gap-2">
               {workflowStep >= 7 ? (
-                <CheckCircle size={14} className="text-success" )
+                <CheckCircle size={14} className="text-success" />
               ) : (
                 <CircleHelp size={14} className="text-muted-foreground" />
               )}
@@ -314,7 +304,7 @@ export default function ScanPage() {
           <p className="text-xs text-muted-foreground">
             Click to capture image from your device camera
           </p>
-          <Button variant="ghost" size="icon" onClick={() => toast.info("Camera functionality coming soon")}>
+          <Button variant="ghost" size="icon" onClick={() => toast({ title: "Camera capture is unavailable" })}>
             <Camera size={24} />
           </Button>
         </div>

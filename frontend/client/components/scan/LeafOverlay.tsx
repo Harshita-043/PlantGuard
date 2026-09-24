@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Loader } from "lucide-react";
-import { LeafResult } from "@/shared/api";
+import { LeafResult } from "@shared/api";
 
 interface LeafOverlayProps {
   imageUrl: string;
@@ -25,15 +25,6 @@ export default function LeafOverlay({
     setImageHeight(img.height);
     setImageLoaded(true);
   };
-
-  if (!imageLoaded || imageWidth === 0 || imageHeight === 0) {
-    return (
-      <div className="w-full h-96 flex items-center justify-center">
-        <Loader size={32} className="mb-4" />
-        <p className="text-muted-foreground">Loading plant image...</p>
-      </div>
-    );
-  }
 
   const leafElements = leafResults.map((leaf, index) => {
     // Convert normalized bounding box to pixel values
@@ -107,9 +98,7 @@ export default function LeafOverlay({
         className="w-full h-full object-cover rounded-xl"
         onLoad={handleImageLoad}
       />
-      <div className="absolute inset-0 pointer-events-none">
-        {leafElements}
-      </div>
+      {!imageLoaded ? <div className="absolute inset-0 flex items-center justify-center bg-muted/70"><Loader size={24} className="mr-2 animate-spin" /><p className="text-muted-foreground">Loading plant image...</p></div> : imageWidth > 0 && imageHeight > 0 && <div className="absolute inset-0 pointer-events-none">{leafElements}</div>}
       <div className="absolute bottom-4 left-4 space-x-2">
         {/* Legend */}
         <div className="flex items-center gap-2 text-xs">

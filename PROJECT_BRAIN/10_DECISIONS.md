@@ -1,5 +1,7 @@
 # PlantGuard AI Technical Decisions
 
+> Historical planning notes below are not evidence of current implementation. The verified choices and current capability status are in [01_ARCHITECTURE.md](01_ARCHITECTURE.md) and [11_AUDIT.md](11_AUDIT.md). Earlier database plans and model artifacts do not establish active persistence or ML inference.
+
 ## Overview
 This document records significant technical decisions made during the development of PlantGuard AI, including the rationale, alternatives considered, and implications. Note that some decisions have been updated to reflect the user's preference for FastAPI and PostgreSQL backend.
 

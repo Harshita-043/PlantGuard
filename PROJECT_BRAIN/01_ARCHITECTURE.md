@@ -1,99 +1,23 @@
-# PlantGuard AI Architecture
+# Verified Architecture
 
-## High-Level Architecture
-PlantGuard AI follows a service-oriented architecture with clean separation of concerns:
-1. **Frontend (Client)**: React/Vite application for user interface
-2. **Backend (Server)**: FastAPI API server with isolated ML service layer
-3. **Machine Learning Services**: Isolated service interfaces for ML components (to be implemented independently)
+## Current application
 
-## Component Diagram
-```
-+------------------+     +------------------+     +---------------------+
-|   Frontend App   |<--->|   API Server     |<--->|   ML Service Layer  |
-|  (React/Vite)    |     |  (FastAPI)       |     |  (Isolated Services)|
-+------------------+     +------------------+     +---------------------+
-        ^                         ^                         ^
-        |                         |                         |
-        |        HTTP/JSON        |        HTTP/JSON        |
-        |                         |                         |
-+------------------+     +------------------+     +---------------------+
-|   Web Browser    |     |   Server (VPS)   |     |   ML Inference    |
-|                  |     |                  |     |   Infrastructure  |
-+------------------+     +------------------+     +---------------------+
-```
+- `frontend/` is a React + TypeScript + Vite single-page application. Its current routes are a dashboard, plant list, image scan, scan results, and shell placeholders. The dashboard and plant pages now identify missing backend data instead of displaying invented records.
+- `backend/app/main.py` exposes FastAPI health, scan, image analysis, and agentic routes. `/api/ping`, `/api/demo`, and `/` return static health/demo responses. Scan and analysis operations return an unavailable response because real inference and persistence are not integrated.
+- `backend/app/services/interfaces/` contains application service contracts. They are not a production ML integration.
+- `backend/app/agent/` contains planning, validation, command, execution, and response contracts/components. It has no registered production capability handlers; the HTTP endpoint is disabled.
+- `backend/app/llm/` contains provider abstractions. Provider adapters are not a verified, active product capability; mock provider selection is rejected.
+- `backend/app/models/` and `backend/migrations/` define a PostgreSQL analysis metadata schema and initial Alembic migration. Analysis/scan APIs do not yet read or write this schema. No plant/user models, object storage, authentication, or ownership enforcement are implemented.
 
-## Technology Stack
+## Runtime and configuration
 
-### Frontend
-- **Framework**: React 18.3.1
-- **Build Tool**: Vite 8.1.5
-- **Styling**: Tailwind CSS 4.3.3
-- **UI Components**: Radix UI primitives
-- **State Management**: React Query (tanstack/query) 5.101.4
-- **Forms**: React Hook Form 7.82.0
-- **Routing**: React Router DOM 6.30.1
-- **Charts**: Recharts 3.10.0
-- **Animations**: Framer Motion 12.42.2
-- **Icons**: Lucide React
-- **TypeScript**: 7.0.2
+- Backend dependencies are listed in `backend/requirements.txt`; run the API from `backend/` with `uvicorn app.main:app --reload --port 8000`.
+- Frontend dependencies are declared in `frontend/package.json`; the package declares pnpm as its package manager. Vite runs on port 8080.
+- Backend CORS defaults to `http://localhost:8080` and can be configured through `BACKEND_CORS_ORIGINS`.
+- Image uploads are size-limited, checked against supported MIME and decoded image formats, and held only in a generated file inside an OS temporary directory for the duration of validation/processing. The temporary directory is removed on all exits. No image is retained; analysis still returns unavailable until real inference is integrated.
 
-### Backend
-- **Runtime**: Node.js (via tsx)
-- **Framework**: Express.js 5.2.1
-- **Middleware**: CORS, body parsing
-- **Environment**: dotenv 17.4.2
-- **Validation**: Zod 4.4.3
+## Verified boundaries
 
-### Machine Learning
-- **Framework**: TensorFlow/Keras
-- **Model Architecture**: EfficientNetV2-B0
-- **Task**: Image classification (38 plant disease classes)
-- **Input Size**: 224x224 RGB images
-- **Pretrained Weights**: ImageNet
-- **Fine-tuning**: Yes (on PlantVillage dataset)
+The root `ml/` directory contains model artifacts, but no application inference code loads or verifies those artifacts. Do not claim model integration or modify those artifacts in application work.
 
-### Development & DevOps
-- **Package Manager**: pnpm 10.14.0
-- **Linting/Formatting**: Prettier 3.9.6
-- **Testing**: Vitest 4.1.10
-- **Type Checking**: TypeScript tsc
-- **Containerization**: Docker (via .dockerignore and implied Dockerfile)
-- **Deployment**: Netlify (via netlify.toml)
-
-## Data Flow
-
-### User Interaction Flow
-1. User interacts with frontend (e.g., uploads plant image)
-2. Frontend sends image to backend API endpoint
-3. Backend receives image and forwards to ML inference service
-4. ML service processes image and returns prediction
-5. Backend formats response and sends to frontend
-6. Frontend displays results to user
-
-### Current State (Audit Finding)
-- **Missing Component**: ML inference service/API endpoint
-- **Current Backend**: Only has `/api/ping` and `/api/demo` endpoints
-- **Missing Integration**: No connection between frontend/backend and ML model
-
-## Deployment Architecture
-- **Frontend**: Built as static SPA, deployed to Netlify CDN
-- **Backend**: Deployed as Node.js server (likely on same infrastructure as frontend via Netlify Functions or separate service)
-- **ML Model**: Currently stored as Keras `.keras` files; needs serving infrastructure
-
-## Security Considerations
-- **CORS**: Configured to allow frontend origins
-- **Input Validation**: Uses Zod for API validation (in shared/api.ts)
-- **Environment Variables**: Managed via dotenv
-- **Missing**: Authentication, rate limiting, image validation
-
-## Scalability Considerations
-- **Frontend**: CDN-cached static assets
-- **Backend**: Horizontal scaling possible with stateless Express.js
-- **ML Inference**: Requires GPU acceleration for real-time predictions; current model size allows CPU inference but may be slow
-
-## Known Gaps
-1. No ML serving infrastructure
-2. Missing API endpoints for plant scanning
-3. No authentication/authorization system
-4. No persistent storage for user data/plants
-5. No MLOps pipeline for model retraining
+Future RAG, recommendations, weather, authentication, persistence, storage, and production deployment remain unimplemented unless code and runtime evidence establish otherwise.

@@ -2,7 +2,9 @@ import {
   PlantAnalysisResponse,
   LeafResult,
   PlantHealthSummary
-} from '@/shared/api';
+} from '@shared/api';
+
+export type { PlantAnalysisResponse, LeafResult, PlantHealthSummary } from '@shared/api';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
@@ -51,7 +53,7 @@ export const analysisApi = {
    * Get analysis results by ID
    */
   getAnalysis: async (analysisId: string): Promise<PlantAnalysisResponse> => {
-    const response = await fetch(`${API_BASE_URL}/api/v1/analyze/${analysisId}`);
+    const response = await fetch(`${API_BASE_URL}/api/v1/analysis/${encodeURIComponent(analysisId)}`);
 
     if (!response.ok) {
       if (response.status === 404) {
@@ -60,6 +62,12 @@ export const analysisApi = {
       throw new Error('Failed to fetch analysis');
     }
 
+    return response.json();
+  },
+
+  getAnalyses: async (skip = 0, limit = 10): Promise<PlantAnalysisResponse[]> => {
+    const response = await fetch(`${API_BASE_URL}/api/v1/analyses?skip=${skip}&limit=${limit}`);
+    if (!response.ok) throw new Error('Analysis history is unavailable');
     return response.json();
   },
 
