@@ -1,7 +1,7 @@
 import { useState } from "react";
 import "./global.css";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Link, NavLink, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   Bell,
   Bot,
@@ -31,6 +31,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 import { useTheme } from "next-themes";
+import { AuthProvider, useAuth } from "@/auth/AuthContext";
+import { getReturnPath } from "@/lib/auth-navigation";
+import AuthPage from "./pages/AuthPage";
 import Index from "./pages/Index";
 import PlantsPage from "./pages/PlantsPage";
 import NotFound from "./pages/NotFound";
@@ -88,7 +91,7 @@ function ThemeToggle({ compact = false }: { compact?: boolean }) {
   return <button onClick={() => setTheme(isDark ? "light" : "dark")} className={`flex items-center gap-2 rounded-xl text-muted-foreground transition hover:bg-muted hover:text-foreground ${compact ? "grid size-10 place-items-center" : "px-3 py-2.5 text-xs font-semibold"}`} aria-label={`Switch to ${isDark ? "light" : "dark"} mode`} title={`Switch to ${isDark ? "light" : "dark"} mode`}>{isDark ? <Sun size={17} /> : <Moon size={17} />}{!compact && <span>{isDark ? "Light mode" : "Dark mode"}</span>}</button>;
 }
 
-function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+function Sidebar({ collapsed, onToggle, userEmail, onLogout }: { collapsed: boolean; onToggle: () => void; userEmail: string; onLogout: () => void }) {
   return (
     <aside className={`hidden min-h-screen shrink-0 border-r border-border/70 bg-card transition-all duration-300 lg:flex lg:flex-col ${collapsed ? "w-[84px]" : "w-[252px]"}`}>
       <div className="flex h-[82px] items-center justify-between border-b border-border/60 px-4">
@@ -134,9 +137,9 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
       </nav>
       <div className={`border-t border-border/70 p-4 ${collapsed ? "flex justify-center" : ""}`}>
         <div className={`flex items-center gap-3 rounded-xl bg-muted/70 p-2.5 ${collapsed ? "w-11 justify-center" : ""}`}>
-          <div className="grid size-8 shrink-0 place-items-center rounded-full bg-[hsl(var(--sage))] text-xs font-bold text-primary">SC</div>
-          {!collapsed && <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-foreground">Guest</p><p className="truncate text-[11px] text-muted-foreground">Authentication unavailable</p></div>}
-          {!collapsed && <LogOut size={16} className="text-muted-foreground" />}
+          <div className="grid size-8 shrink-0 place-items-center rounded-full bg-[hsl(var(--sage))] text-xs font-bold uppercase text-primary">{userEmail.slice(0, 1) || "U"}</div>
+          {!collapsed && <div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-foreground">{userEmail}</p><p className="truncate text-[11px] text-muted-foreground">Signed in</p></div>}
+          <button onClick={onLogout} className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-background hover:text-foreground" aria-label="Sign out" title="Sign out"><LogOut size={16} /></button>
         </div>
       </div>
     </aside>
@@ -155,21 +158,58 @@ function MobileNav({ onMore }: { onMore: () => void }) {
   </nav>;
 }
 
-function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+function MoreSheet({ open, onClose, onLogout }: { open: boolean; onClose: () => void; onLogout: () => void }) {
   if (!open) return null;
-  return <div className="fixed inset-0 z-50 bg-foreground/20 backdrop-blur-sm lg:hidden" onClick={onClose}><div className="absolute inset-x-0 bottom-0 rounded-t-[28px] bg-card p-5 pb-8 shadow-2xl" onClick={(e) => e.stopPropagation()}><div className="mx-auto mb-5 h-1 w-10 rounded-full bg-border" /><div className="mb-5 flex items-center justify-between"><div><h2 className="text-lg font-semibold">More from PlantGuard</h2><p className="text-xs text-muted-foreground">Tools to help your plants thrive</p></div><button onClick={onClose} className="grid size-9 place-items-center rounded-full bg-muted text-muted-foreground" aria-label="Close menu"><X size={18} /></button></div><div className="grid grid-cols-2 gap-2">{[...navItems.slice(4), ...secondaryItems].map((item) => { const Icon = item.icon; return <NavLink key={item.to} to={item.to} onClick={onClose} className="flex items-center gap-3 rounded-xl border border-border/70 p-3 text-sm font-medium text-foreground transition hover:bg-muted"><span className="grid size-9 place-items-center rounded-lg bg-muted text-primary"><Icon size={18} /></span>{item.label}</NavLink>; })}</div><div className="mt-3 flex items-center justify-between rounded-xl bg-muted/60 p-1"><span className="pl-3 text-xs font-semibold text-muted-foreground">Appearance</span><ThemeToggle compact /></div><button className="mt-3 flex w-full items-center gap-3 rounded-xl p-3 text-sm font-medium text-muted-foreground"><LogOut size={18} /> Log out</button></div></div>;
+  return <div className="fixed inset-0 z-50 bg-foreground/20 backdrop-blur-sm lg:hidden" onClick={onClose}><div className="absolute inset-x-0 bottom-0 rounded-t-[28px] bg-card p-5 pb-8 shadow-2xl" onClick={(e) => e.stopPropagation()}><div className="mx-auto mb-5 h-1 w-10 rounded-full bg-border" /><div className="mb-5 flex items-center justify-between"><div><h2 className="text-lg font-semibold">More from PlantGuard</h2><p className="text-xs text-muted-foreground">Tools to help your plants thrive</p></div><button onClick={onClose} className="grid size-9 place-items-center rounded-full bg-muted text-muted-foreground" aria-label="Close menu"><X size={18} /></button></div><div className="grid grid-cols-2 gap-2">{[...navItems.slice(4), ...secondaryItems].map((item) => { const Icon = item.icon; return <NavLink key={item.to} to={item.to} onClick={onClose} className="flex items-center gap-3 rounded-xl border border-border/70 p-3 text-sm font-medium text-foreground transition hover:bg-muted"><span className="grid size-9 place-items-center rounded-lg bg-muted text-primary"><Icon size={18} /></span>{item.label}</NavLink>; })}</div><div className="mt-3 flex items-center justify-between rounded-xl bg-muted/60 p-1"><span className="pl-3 text-xs font-semibold text-muted-foreground">Appearance</span><ThemeToggle compact /></div><button onClick={onLogout} className="mt-3 flex w-full items-center gap-3 rounded-xl p-3 text-sm font-medium text-muted-foreground hover:bg-muted"><LogOut size={18} /> Sign out</button></div></div>;
 }
 
-function AppHeader({ onMore }: { onMore: () => void }) {
+function AppHeader({ onMore, userEmail }: { onMore: () => void; userEmail: string }) {
   const location = useLocation();
   const title = titles[location.pathname] ?? (location.pathname.startsWith("/plants/") ? "Plant details" : "PlantGuard AI");
-  return <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-4 backdrop-blur-md sm:px-8 lg:px-10"><div className="flex items-center gap-3"><button onClick={onMore} className="grid size-10 place-items-center rounded-xl bg-card text-muted-foreground shadow-sm ring-1 ring-border/70 lg:hidden" aria-label="Open menu"><Menu size={19} /></button><div><p className="hidden text-[11px] font-medium text-muted-foreground sm:block">{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p><h1 className="text-[19px] font-semibold tracking-[-0.03em] text-foreground sm:text-[21px]">{title}</h1></div></div><div className="flex items-center gap-2 sm:gap-4"><ThemeToggle compact /><Link to="/scan" className="hidden items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-[0_8px_18px_-12px_hsl(var(--primary))] transition hover:-translate-y-0.5 sm:flex"><ScanLine size={16} /> Scan plant</Link><Link to="/profile" className="grid size-10 place-items-center rounded-full bg-[hsl(var(--sage))] text-xs font-bold text-primary ring-2 ring-card sm:size-9" aria-label="Profile">G</Link></div></header>;
+  return <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-4 backdrop-blur-md sm:px-8 lg:px-10"><div className="flex items-center gap-3"><button onClick={onMore} className="grid size-10 place-items-center rounded-xl bg-card text-muted-foreground shadow-sm ring-1 ring-border/70 lg:hidden" aria-label="Open menu"><Menu size={19} /></button><div><p className="hidden text-[11px] font-medium text-muted-foreground sm:block">{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p><h1 className="text-[19px] font-semibold tracking-[-0.03em] text-foreground sm:text-[21px]">{title}</h1></div></div><div className="flex items-center gap-2 sm:gap-4"><ThemeToggle compact /><Link to="/scan" className="hidden items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-[0_8px_18px_-12px_hsl(var(--primary))] transition hover:-translate-y-0.5 sm:flex"><ScanLine size={16} /> Scan plant</Link><Link to="/profile" className="grid size-10 place-items-center rounded-full bg-[hsl(var(--sage))] text-xs font-bold uppercase text-primary ring-2 ring-card sm:size-9" aria-label={`Profile for ${userEmail}`}>{userEmail.slice(0, 1) || "U"}</Link></div></header>;
 }
 
 function AppShell() {
   const [collapsed, setCollapsed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  return <div className="min-h-screen bg-background"><div className="flex min-h-screen"><Sidebar collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} /><div className="min-w-0 flex-1"><AppHeader onMore={() => setMoreOpen(true)} /><main className="mx-auto w-full max-w-[1440px] px-4 pb-28 pt-7 sm:px-8 lg:px-10 lg:pb-10"><Outlet /></main></div></div><MobileNav onMore={() => setMoreOpen(true)} /><MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} /></div>;
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const userEmail = user?.email ?? "";
+  function handleLogout() {
+    logout();
+    setMoreOpen(false);
+    navigate("/login", { replace: true });
+  }
+  return <div className="min-h-screen bg-background"><div className="flex min-h-screen"><Sidebar collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} userEmail={userEmail} onLogout={handleLogout} /><div className="min-w-0 flex-1"><AppHeader onMore={() => setMoreOpen(true)} userEmail={userEmail} /><main className="mx-auto w-full max-w-[1440px] px-4 pb-28 pt-7 sm:px-8 lg:px-10 lg:pb-10"><Outlet /></main></div></div><MobileNav onMore={() => setMoreOpen(true)} /><MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} onLogout={handleLogout} /></div>;
+}
+
+function AuthLoading() {
+  return <main className="grid min-h-screen place-items-center bg-background p-6"><p className="flex items-center gap-2 text-sm text-muted-foreground" role="status"><span className="size-4 animate-spin rounded-full border-2 border-primary border-r-transparent" />Checking your sign-in…</p></main>;
+}
+
+function RequireAuthentication() {
+  const auth = useAuth();
+  const location = useLocation();
+  if (auth.status === "loading") return <AuthLoading />;
+  if (auth.status === "unavailable") {
+    return <main className="grid min-h-screen place-items-center bg-background p-6"><section className="max-w-md rounded-2xl border border-border bg-card p-6 text-center"><h1 className="text-lg font-semibold">Could not verify your session</h1><p className="mt-2 text-sm text-muted-foreground">{auth.error || "The authentication service is unavailable."}</p><div className="mt-5 flex justify-center gap-3"><button onClick={() => void auth.retrySession()} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">Retry</button><Link to="/login" state={{ from: `${location.pathname}${location.search}${location.hash}` }} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold">Sign in</Link></div></section></main>;
+  }
+  if (auth.status !== "authenticated") {
+    return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}${location.hash}`, sessionExpired: auth.sessionExpired }} />;
+  }
+  return <Outlet />;
+}
+
+function PublicAuthenticationRoutes() {
+  const auth = useAuth();
+  const location = useLocation();
+  if (auth.status === "loading") return <AuthLoading />;
+  if (auth.status === "authenticated") {
+    const state = typeof location.state === "object" && location.state !== null ? location.state : {};
+    const destination = getReturnPath(state);
+    return <Navigate to={destination} replace />;
+  }
+  return <Outlet />;
 }
 
 function PlaceholderPage({ title, icon: Icon = CircleHelp }: { title: string; icon?: typeof CircleHelp }) {
@@ -177,8 +217,28 @@ function PlaceholderPage({ title, icon: Icon = CircleHelp }: { title: string; ic
 }
 
 export default function App() {
-  return <ThemeProvider attribute="class" defaultTheme="system" enableSystem storageKey="plantguard-theme"><BrowserRouter><Toaster /><Sonner /><Routes><Route element={<AppShell />}><Route path="/" element={<Index />} /><Route path="/dashboard" element={<Index />} /><Route path="/plants" element={<PlantsPage />} /><Route path="/scan" element={<ScanPage />} />
-<Route path="/scan/results/:scanId" element={<ScanResultsPage />} /><Route path="/history" element={<PlaceholderPage title="Scan history" icon={History} />} /><Route path="/recommendations" element={<PlaceholderPage title="Recommendations" icon={FileText} />} /><Route path="/weather" element={<PlaceholderPage title="Weather insights" icon={CloudSun} />} /><Route path="/chat" element={<PlaceholderPage title="AI assistant" icon={Bot} />} /><Route path="/profile" element={<PlaceholderPage title="Your profile" icon={UserRound} />} /><Route path="/settings" element={<PlaceholderPage title="Settings" icon={Settings} />} /><Route path="*" element={<NotFound />} /></Route></Routes></BrowserRouter></ThemeProvider>;
+  return <ThemeProvider attribute="class" defaultTheme="system" enableSystem storageKey="plantguard-theme"><BrowserRouter><AuthProvider><Toaster /><Sonner /><Routes>
+    <Route element={<PublicAuthenticationRoutes />}>
+      <Route path="/login" element={<AuthPage mode="login" />} />
+      <Route path="/register" element={<AuthPage mode="register" />} />
+    </Route>
+    <Route element={<RequireAuthentication />}>
+      <Route element={<AppShell />}>
+        <Route path="/" element={<Index />} />
+        <Route path="/dashboard" element={<Index />} />
+        <Route path="/plants" element={<PlantsPage />} />
+        <Route path="/scan" element={<ScanPage />} />
+        <Route path="/scan/results/:scanId" element={<ScanResultsPage />} />
+        <Route path="/history" element={<HistoryPage />} />
+        <Route path="/recommendations" element={<PlaceholderPage title="Recommendations" icon={FileText} />} />
+        <Route path="/weather" element={<PlaceholderPage title="Weather insights" icon={CloudSun} />} />
+        <Route path="/chat" element={<PlaceholderPage title="AI assistant" icon={Bot} />} />
+        <Route path="/profile" element={<PlaceholderPage title="Your profile" icon={UserRound} />} />
+        <Route path="/settings" element={<PlaceholderPage title="Settings" icon={Settings} />} />
+        <Route path="*" element={<NotFound />} />
+      </Route>
+    </Route>
+  </Routes></AuthProvider></BrowserRouter></ThemeProvider>;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

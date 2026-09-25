@@ -7,7 +7,7 @@ The repository contains a React/Vite frontend and a FastAPI backend. Consult `PR
 - Do not implement or modify the ML track in an application task. Root `ml/` artifacts exist, but the application does not load them for inference.
 - Do not return fabricated plant diagnoses, severity, confidence, evidence, or health scores. Analysis endpoints are intentionally unavailable until real inference is integrated.
 - The agentic core has contracts/components but no production capability handlers. Never add arbitrary command, code, SQL, filesystem, network, model, or storage execution.
-- SQLAlchemy/PostgreSQL configuration and Alembic migrations provide the initial analysis metadata schema. Analysis/scan API persistence, plant CRUD, authentication/authorization, and object storage are still unavailable.
+- SQLAlchemy/PostgreSQL and Alembic provide analysis metadata and a minimal email/password user table. Backend registration, login, JWT bearer validation, and `/api/v1/auth/me` exist; the frontend is not connected, and no resource ownership checks or other authorization are implemented. Provider-independent local, Supabase Storage, and R2 adapters exist, but upload/scan API persistence and stored-media access are unavailable. Local storage requires no cloud credentials.
 - Frontend data must come from FastAPI. Do not replace missing backend services with hardcoded sample user or plant records.
 
 ## Project documentation

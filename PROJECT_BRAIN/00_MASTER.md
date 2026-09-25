@@ -1,6 +1,6 @@
 # PlantGuard AI — Project Overview
 
-PlantGuard AI is currently a React/Vite frontend and FastAPI backend shell. It does not currently provide real plant diagnosis, authentication, user/plant/scan persistence, object storage, or an active LLM workflow.
+PlantGuard AI is currently a React/Vite frontend and FastAPI backend shell. Backend email/password authentication now exists, but the frontend is not connected and authorization/ownership checks are not implemented. Real plant diagnosis, plant/scan persistence, integrated image storage, and an active LLM workflow are still unavailable. Private local, Supabase Storage, and Cloudflare R2 adapters exist behind a storage interface, but no API flow currently uses them.
 
 The root `ml/` directory contains model artifacts. Their inference integration with the application is **NOT VERIFIED**; application code must not claim or fabricate ML results.
 

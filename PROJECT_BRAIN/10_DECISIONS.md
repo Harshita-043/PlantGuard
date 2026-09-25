@@ -501,13 +501,13 @@ This document records significant technical decisions made during the developmen
 - Automatic Swagger/OpenAPI docs from FastAPI reduce documentation burden
 
 ## Decision 21: Authentication Approach
-**Decision**: Plan to implement JWT-based authentication.
+**Decision**: Use short-lived JWT bearer access tokens for the first-party API. Passwords are hashed with Argon2id. Access tokens expire after 30 minutes by default; there is no refresh-token or server-side revocation system.
 
 **Rationale**:
 - Stateless and scalable
 - Works well with SPA architectures
 - Easy to implement and understand
-- Token can contain user information and permissions
+- Token identifies the account by its UUID subject; resource permissions and ownership are not included or enforced in this phase.
 - Standard approach with many libraries and best practices
 - Works well with serverless architectures
 - Integrates well with FastAPI security utilities
@@ -520,8 +520,8 @@ This document records significant technical decisions made during the developmen
 - **Third-party auth (Auth0, Firebase Auth)**: Feature-rich but adds dependency and cost
 
 **Implications**:
-- Need to implement secure token storage (httpOnly cookies or secure localStorage)
-- Requires refreshing tokens and handling expiration
+- Frontend login/token storage is not connected yet. The client must not persist tokens insecurely when that work is implemented.
+- Clients must handle token expiration by signing in again; refresh tokens are intentionally not added.
 - Need to implement role-based access control (RBAC) if needed
 - Standard approach with plenty of examples and libraries
 - Good balance of security and usability for application type
@@ -561,9 +561,10 @@ This document records significant technical decisions made during the developmen
 - Factors: Team expertise, performance needs, migration capabilities, async support
 
 ### 2. Image Storage Solution
-**Pending Decision**: Choose where to store uploaded plant images.
-- Options: Cloud storage (AWS S3, Google Cloud Storage), PostgreSQL LOB/ByteA, traditional file storage
-- Factors: Cost, scalability, backup needs, serving performance, security
+**Decision**: Use a provider-independent object storage interface with a local adapter for development and Supabase Storage through its S3-compatible API as the selected production adapter. Retain the existing Cloudflare R2 adapter as an optional provider.
+- Supabase Storage buckets remain private; generated S3 credentials are server-only and bypass Storage RLS, so authentication/authorization must be implemented before storing user-owned files.
+- The adapters are not yet connected to upload or persistence workflows. No signed URL or public file-serving path is currently needed.
+- Revisit upload persistence, lifecycle, and ownership before wiring storage into API routes.
 
 ### 3. ML Serving Infrastructure
 **Pending Decision**: Determine how to serve the ML model for inference.

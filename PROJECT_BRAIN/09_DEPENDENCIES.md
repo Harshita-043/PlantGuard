@@ -6,7 +6,7 @@ The checked-in manifests are authoritative for declared application dependencies
 - Backend: `backend/requirements.txt`.
 - Root ML artifacts have separate requirements/runtime needs that are not integrated into the backend application and are outside this application audit.
 
-The current backend manifest includes FastAPI, Pydantic, pydantic-settings, Pillow, NumPy, multipart form support, SQLAlchemy, Alembic, and Psycopg 3 with its binary distribution. Persistence packages support the initial analysis schema; API persistence is not wired.
+The current backend manifest includes FastAPI, Pydantic, pydantic-settings, Pillow, NumPy, multipart form support, SQLAlchemy, Alembic, Psycopg 3 with its binary distribution, and boto3 for the Supabase Storage and Cloudflare R2 S3-compatible adapters. Persistence packages support the initial analysis schema; database and object storage are not wired into API workflows.
 
 Do not treat package presence as evidence that a capability is implemented. Do not introduce dependencies for future features during stabilization.
 

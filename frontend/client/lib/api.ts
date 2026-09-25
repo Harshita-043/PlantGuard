@@ -1,97 +1,61 @@
-import {
-  PlantAnalysisResponse,
-  LeafResult,
-  PlantHealthSummary
-} from '@shared/api';
+import type { AnalysisLifecycleResponse } from "@shared/api";
 
-export type { PlantAnalysisResponse, LeafResult, PlantHealthSummary } from '@shared/api';
+export type { AnalysisLifecycleResponse } from "@shared/api";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const API_BASE_URL = import.meta.env.VITE_API_URL || "";
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+async function readError(response: Response): Promise<ApiError> {
+  let message = `Request failed (${response.status})`;
+  try {
+    const body: unknown = await response.json();
+    if (typeof body === "object" && body !== null && "detail" in body && typeof body.detail === "string") {
+      message = body.detail;
+    }
+  } catch {
+    // Use the safe status-based message for non-JSON errors.
+  }
+  return new ApiError(message, response.status);
+}
+
+async function authenticatedRequest<T>(path: string, accessToken: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      ...init.headers,
+    },
+  });
+  if (!response.ok) throw await readError(response);
+  return (await response.json()) as T;
+}
 
 export const analysisApi = {
-  /**
-   * Analyze a plant image for health assessment
-   */
-  analyzeImage: async (imageFile: File): Promise<PlantAnalysisResponse> => {
+  analyzeImage(imageFile: File, accessToken: string): Promise<AnalysisLifecycleResponse> {
     const formData = new FormData();
-    formData.append('file', imageFile);
-
-    const response = await fetch(`${API_BASE_URL}/api/v1/analyze/image`, {
-      method: 'POST',
+    formData.append("file", imageFile);
+    return authenticatedRequest<AnalysisLifecycleResponse>("/api/v1/analyze/image", accessToken, {
+      method: "POST",
       body: formData,
     });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || 'Failed to analyze image');
-    }
-
-    return response.json();
   },
 
-  /**
-   * Analyze a plant video frame for health assessment
-   */
-  analyzeVideo: async (videoFile: File): Promise<PlantAnalysisResponse> => {
-    const formData = new FormData();
-    formData.append('file', videoFile);
-
-    const response = await fetch(`${API_BASE_URL}/api/v1/analyze/video`, {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || 'Failed to analyze video');
-    }
-
-    return response.json();
+  getAnalysis(analysisId: string, accessToken: string): Promise<AnalysisLifecycleResponse> {
+    return authenticatedRequest<AnalysisLifecycleResponse>(
+      `/api/v1/analysis/${encodeURIComponent(analysisId)}`,
+      accessToken,
+    );
   },
 
-  /**
-   * Get analysis results by ID
-   */
-  getAnalysis: async (analysisId: string): Promise<PlantAnalysisResponse> => {
-    const response = await fetch(`${API_BASE_URL}/api/v1/analysis/${encodeURIComponent(analysisId)}`);
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new Error('Analysis not found');
-      }
-      throw new Error('Failed to fetch analysis');
-    }
-
-    return response.json();
+  getAnalyses(accessToken: string, skip = 0, limit = 10): Promise<AnalysisLifecycleResponse[]> {
+    const query = new URLSearchParams({ skip: String(skip), limit: String(limit) });
+    return authenticatedRequest<AnalysisLifecycleResponse[]>(`/api/v1/analyses?${query}`, accessToken);
   },
-
-  getAnalyses: async (skip = 0, limit = 10): Promise<PlantAnalysisResponse[]> => {
-    const response = await fetch(`${API_BASE_URL}/api/v1/analyses?skip=${skip}&limit=${limit}`);
-    if (!response.ok) throw new Error('Analysis history is unavailable');
-    return response.json();
-  },
-
-  /**
-   * Health check for the analysis service
-   */
-  healthCheck: async (): Promise<{ status: string; service: string; ml_mode: string }> => {
-    const response = await fetch(`${API_BASE_URL}/api/v1/analyze/health`);
-    if (!response.ok) {
-      throw new Error('Health check failed');
-    }
-    return response.json();
-  }
-};
-
-// Legacy API endpoints (keeping for compatibility)
-export const legacyApi = {
-  ping: async (): Promise<{ message: string }> => {
-    const response = await fetch(`${API_BASE_URL}/api/ping`);
-    return response.json();
-  },
-
-  demo: async (): Promise<{ message: string }> => {
-    const response = await fetch(`${API_BASE_URL}/api/demo`);
-    return response.json();
-  }
 };

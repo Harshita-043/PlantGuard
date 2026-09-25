@@ -1,5 +1,13 @@
 # PlantGuard AI Changelog
 
+## 2026-09-25 — Authenticated image persistence lifecycle
+
+- Connected `POST /api/v1/analyze/image` to the configured existing object-storage provider after validating the uploaded image; the client filename is not used for temporary or object paths.
+- Added a required private object reference to Analysis and migration `0004_analysis_storage_reference` (reversible, with no backfill); the live database is at this revision.
+- Added owner-scoped pending analysis retrieval and history. The API returns lifecycle metadata only; ML results remain unavailable.
+- Updated the scan, result, and history views to use the existing JWT session and show the pending/unavailable state without fabricated diagnosis data.
+- Verification: full backend suite 113 passed, 1 skipped; frontend typecheck passed. Vitest could not start under this Windows environment (`spawn EPERM`).
+
 ## 2026-09-24 — Repository audit correction
 
 The preceding phase summaries contain implementation claims that were not supported by the current source/runtime and are superseded by [11_AUDIT.md](11_AUDIT.md). Current verified changes:
@@ -18,6 +26,10 @@ The older entries below are historical claims from earlier phases, not proof tha
 - Added a PostgreSQL analysis metadata model, SQLAlchemy session configuration, and an initial reversible Alembic migration. No API persistence or seed data was added.
 - A local PostgreSQL server/database and `DATABASE_URL` are required to apply the migration; see `MANUAL_SETUP.md`.
 - Added bounded local temporary handling for image uploads: JPEG, PNG, and WebP are validated against their actual decoded format, with generated filenames and cleanup on every exit path. Analysis remains unavailable without real inference.
+- Added a provider-independent object storage interface and a private local filesystem adapter. It stores generated or validated safe object keys, content, content type, and string metadata atomically. It is not integrated into application upload or persistence flows.
+- Added a Cloudflare R2 production adapter behind the existing storage interface using boto3's S3-compatible API. Provider selection is explicit; R2 requires bucket, HTTPS endpoint, and backend-only credentials and never falls back to local storage. R2 keys use a fixed `plantguard/` namespace. The local adapter remains available.
+- Added a Supabase Storage adapter behind the existing interface using its S3-compatible API. Provider selection is explicit, credentials are backend-only, keys use the fixed `plantguard/` namespace, and the adapter is not connected to API workflows. Local and R2 adapters remain available.
+- Added a `users` table in a reversible Alembic migration and backend email/password registration, login, and authenticated identity endpoints. Passwords use Argon2id; login issues expiring JWT bearer tokens. No seed users or ownership checks were added.
 
 ### Changed
 - Updated pinned backend runtime dependencies for Python 3.14, including Pillow, NumPy, Pydantic, and FastAPI.
@@ -31,6 +43,11 @@ The older entries below are historical claims from earlier phases, not proof tha
 - Restored the analysis health route at `/api/v1/analyze/health`; it returns 503 with the existing explicit unavailable detail while real inference is not integrated. The API contract and existing test already described this behavior.
 - Verified PostgreSQL read-only: service `postgresql-x64-18` is running, `public.analyses` exists, and the current Alembic revision is `0001_initial_analysis`. No database writes or migrations were performed.
 - Re-ran checks: database tests 3 passed, upload tests 10 passed, agent/LLM tests 13 passed, analysis health endpoint test passed, and full backend suite 34 passed. Existing Pydantic, Starlette, and HTTP status deprecation warnings remain.
+- Added focused object storage tests for generated and nested keys, traversal rejection, read/write/delete/exists behavior, binary and metadata preservation, write failures, and storage-root confinement.
+- Focused local storage tests passed (22); full backend suite passed (56). The existing deprecation warnings remain.
+- R2 adapter tests passed (19) using Botocore Stubber without real credentials. The full backend suite passed (75); existing Pydantic, Starlette, and HTTP status deprecation warnings remain. No live R2 bucket integration test was run.
+- Added authentication with Argon2id password hashing, short-lived JWT bearer tokens, user registration/login/current-identity APIs, and a reversible `0002_users` migration. The migration chain head is `0002_users`; offline upgrade SQL generation passed and no live migration was applied. Authentication tests use isolated SQLite without seeded users.
+- Authentication tests and database model tests passed (16); the opt-in PostgreSQL connectivity check was skipped because `TEST_DATABASE_URL` was unset. Full backend suite passed (107), with 1 opt-in database check skipped and 45 existing/new dependency deprecation warnings. `app.main` import passed.
 
 - LLM Abstraction / Provider Layer (Prompt 5)
   - LLM service interface defining contract for LLM services

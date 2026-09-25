@@ -9,3 +9,7 @@ python-dotenv==1.0.0
 SQLAlchemy==2.0.54
 alembic==1.20.0
 psycopg[binary]==3.3.6
+boto3==1.43.101
+argon2-cffi==25.1.0
+PyJWT==2.15.0
+email-validator==2.3.0

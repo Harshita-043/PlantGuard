@@ -1,6 +1,6 @@
 # Manual setup
 
-This file records only setup supported by the current repository. The app is a frontend and API shell; real plant analysis and API persistence, authentication, and object storage are not available. A PostgreSQL schema/migration foundation exists, but no API currently writes analysis rows.
+This file records only setup supported by the current repository. The app is a frontend and API shell; backend email/password authentication is available, but frontend auth, authorization/ownership, real plant analysis, API analysis persistence, and upload-to-storage integration are not. Local, Supabase Storage, and Cloudflare R2 adapters can be selected through the storage factory, but current API routes do not call them. PostgreSQL stores the initial analysis schema and authentication users.
 
 ## Required now — local development
 
@@ -8,7 +8,7 @@ This file records only setup supported by the current repository. The app is a f
 2. From the repository root, create a backend environment file:
 
    ```powershell
-   Copy-Item .env.example backend/.env
+   Copy-Item backend/.env.example backend/.env
    ```
 
    The defaults are local-only. Keep secrets out of source control. `.env` files are ignored.
@@ -33,7 +33,7 @@ This file records only setup supported by the current repository. The app is a f
    alembic upgrade head
    ```
 
-   To roll back this initial migration in a disposable development database, run `alembic downgrade base`; this drops the `analyses` table and its data. Back up data before rolling back any database that matters. The database setup creates schema only and adds no seed records.
+   `alembic upgrade head` applies the complete migration chain: the analyses and users tables, Analysis-to-User ownership, and the required private image object reference. No seed users or Analysis records are created. To roll back only the user-table migration in a disposable development database, run `alembic downgrade 0001_initial_analysis`; this removes all account records. `alembic downgrade base` also removes the analyses table and its data. Never downgrade a database with data you need.
 
    Start FastAPI after configuring the database:
 
@@ -56,9 +56,80 @@ This file records only setup supported by the current repository. The app is a f
 
 - `GET http://localhost:8000/api/ping` returns the health ping.
 - `GET http://localhost:8000/docs` exposes FastAPI's generated API documentation.
-- Image scan and agentic scan endpoints return `503` until actual ML inference is integrated. Video analysis returns `501`.
-- Plant records, scan history, accounts, and uploaded-media persistence are not implemented. The analysis schema is not yet used by API routes.
-- PostgreSQL and Alembic are required to apply the analysis schema. Object storage, an LLM account, and an API key are not required by active API behavior.
+- Image uploads create pending records; disease analysis remains unavailable until real ML inference is integrated. Agentic scan endpoints return `503`; video analysis returns `501`.
+- Registration, login, authenticated identity lookup, and frontend sign-in are implemented. Authenticated image uploads create private, owner-scoped pending Analysis records; owner-scoped retrieval and history are available. Real plant inference/results, Plant CRUD, account recovery/email verification, and video analysis are not implemented.
+- PostgreSQL and Alembic are required for account registration/login and image-record persistence. Set `JWT_SECRET_KEY` before using login. Local storage needs no cloud credentials; an LLM account and API key are not required for local development.
+
+## Configure backend authentication
+
+1. In `backend/.env`, set `JWT_SECRET_KEY` to a unique random secret. From Git Bash, run this in the `backend/` directory:
+
+   ```bash
+   ./.venv/Scripts/python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
+   ```
+
+   Keep the generated value only in `backend/.env` or the deployment secret store. Do not commit it or send it in chat. `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` defaults to `30` and can be adjusted up to 1440 minutes.
+2. Install the current backend requirements and apply migrations from `backend/`:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+   alembic upgrade head
+   ```
+
+   `alembic upgrade head` applies the full migration chain through `0004_analysis_storage_reference`; that migration adds the required private image object-key column and unique index after `0003_analysis_ownership` adds the owner relationship. Migrations insert no users or Analysis records. Ensure `DATABASE_URL` points at the intended PostgreSQL database.
+3. Registration accepts an email and a 12–128 character password. Login returns an access token. Send it as `Authorization: Bearer <token>` to `GET /api/v1/auth/me`. The client must discard the token on logout and after expiry; this backend does not issue refresh tokens or provide server-side token revocation.
+
+The SPA provides login and registration and holds the bearer token in tab-scoped session storage. The signing key must contain at least 32 bytes; login and authenticated identity return `503` when it is absent or too short.
+
+## Storage configuration
+
+### Local development
+
+Use the default `OBJECT_STORAGE_PROVIDER=local`. Local storage requires no Supabase or R2 account or credentials. Its root defaults to `.local-storage` under the backend working directory and is ignored by Git.
+
+### Supabase production storage adapter
+
+The image upload route writes validated images through the provider selected by `OBJECT_STORAGE_PROVIDER`. Supabase Storage is used only when explicitly selected and fully configured; the bucket should remain private. Configuring it does not make image URLs public or expose storage credentials to the frontend.
+
+1. Create or select a Supabase project.
+2. Create a **private** Storage bucket in the project. Do not enable public access or public URLs.
+3. In Storage S3 configuration, enable the S3 protocol and generate server-side S3 access keys. Copy the endpoint and region shown there. Supabase documents that these credentials provide full S3 access across buckets and bypass Storage RLS; keep them only in the backend environment. Image reads are not exposed through an API route. See [Supabase S3 authentication](https://supabase.com/docs/guides/storage/s3/authentication).
+4. Copy `backend/.env.example` to `backend/.env` if needed and set:
+
+   ```dotenv
+   OBJECT_STORAGE_PROVIDER=supabase
+   SUPABASE_STORAGE_ENDPOINT=https://<PROJECT_REF>.storage.supabase.co/storage/v1/s3
+   SUPABASE_STORAGE_REGION=<region-from-supabase-s3-settings>
+   SUPABASE_STORAGE_BUCKET=<private-bucket-name>
+   SUPABASE_STORAGE_ACCESS_KEY_ID=<server-side-s3-access-key-id>
+   SUPABASE_STORAGE_SECRET_ACCESS_KEY=<server-side-s3-secret-access-key>
+   ```
+
+   Use the direct storage hostname and endpoint path from the Supabase S3 settings. Replace placeholders locally; do not put real credentials in source control or chat. The adapter requires every Supabase setting and does not fall back to local storage. The configured bucket is not verified until the round-trip check succeeds.
+5. From `backend/`, run this round-trip verification. It writes under a generated key and deletes the object afterward:
+
+   ```powershell
+   @'
+   from app.storage import create_object_storage
+
+   storage = create_object_storage()
+   key = None
+   try:
+       key = storage.put(b"plantguard-storage-check", content_type="text/plain")
+       assert storage.exists(key)
+       assert storage.get(key).content == b"plantguard-storage-check"
+       print("Configured object storage round trip passed")
+   finally:
+       if key is not None:
+           storage.delete(key)
+   '@ | .\.venv\Scripts\python.exe -
+   ```
+
+Supabase's S3 API uses path-style requests and the project region configured in the dashboard. See [Supabase S3 compatibility](https://supabase.com/docs/guides/storage/s3/compatibility). Do not use local selection as a production fallback.
+
+### Optional Cloudflare R2 adapter
+
+R2 remains supported but is not required. It is not used by current API routes. To select it, use `OBJECT_STORAGE_PROVIDER=r2` and configure `R2_BUCKET_NAME`, `R2_ENDPOINT_URL`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`. Keep the bucket private and credentials backend-only; R2 configuration does not silently fall back to local storage.
 
 ## Optional checks
 
@@ -78,8 +149,9 @@ The backend test suite requires pytest and a compatible TestClient dependency. M
 
 ## Verification checklist
 
-- [ ] Copy `.env.example` to `backend/.env` and `frontend/.env.example` to `frontend/.env`.
-- [ ] Install/start PostgreSQL, create `plantguard`, configure `DATABASE_URL`, and run `alembic upgrade head`.
+- [ ] Copy `backend/.env.example` to `backend/.env` and `frontend/.env.example` to `frontend/.env`.
+- [ ] Install/start PostgreSQL, create `plantguard`, configure `DATABASE_URL`, and run `alembic upgrade head` (applies analyses, users, ownership, and the private image object reference through `0004_analysis_storage_reference`).
+- [ ] Generate and configure a private `JWT_SECRET_KEY` in `backend/.env` before testing login.
 - [ ] Start FastAPI and confirm `GET /api/ping` returns `{"message":"pong"}`.
 - [ ] Start Vite on port `8080` and confirm the frontend renders.
 - [ ] Run frontend typecheck, tests, and build.
@@ -92,8 +164,8 @@ The backend test suite requires pytest and a compatible TestClient dependency. M
 
 - Integrate verified ML inference before enabling image/video analysis.
 - Add and test persistence API workflows before enabling plant or scan history.
-- Implement authentication, authorization, and per-user ownership checks before storing user data.
-- Implement private object storage and secure upload/access checks before retaining media.
+- Implement authorization/ownership checks and frontend authentication/token handling before storing user-owned data.
+- Integrate the private storage adapter with a defined upload lifecycle and secure access checks before retaining media.
 - Configure production CORS origins, secrets, provider credentials (only if an active provider is integrated), deployment, monitoring, and operational backups.
 
 ## Required when ML is integrated

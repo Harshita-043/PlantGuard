@@ -49,3 +49,37 @@ export interface PlantAnalysisResponse {
   processing_time_ms?: number;
   ml_mode: string; // 'mock' or 'real'
 }
+
+/** Persisted image lifecycle metadata; it contains no inferred plant results. */
+export interface AnalysisLifecycleResponse {
+  analysis_id: string;
+  status: "pending" | "completed" | "failed";
+  created_at: string;
+  image_content_type: string;
+  image_size_bytes: number;
+  result_available: boolean;
+}
+
+/** Public account fields returned by the FastAPI authentication endpoints. */
+export interface AuthUserResponse {
+  id: string;
+  email: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RegisterRequest {
+  email: string;
+  password: string;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: "bearer";
+  expires_in: number;
+}
