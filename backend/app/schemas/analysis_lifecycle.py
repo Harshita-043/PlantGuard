@@ -6,9 +6,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.inference import FullScanResult
+
 
 class AnalysisLifecycleResponse(BaseModel):
-    """Safe analysis metadata; private object keys and owner IDs stay internal."""
+    """Safe lifecycle metadata and the result when inference has completed."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -18,3 +20,4 @@ class AnalysisLifecycleResponse(BaseModel):
     image_content_type: str
     image_size_bytes: int
     result_available: bool
+    result: FullScanResult | None = None

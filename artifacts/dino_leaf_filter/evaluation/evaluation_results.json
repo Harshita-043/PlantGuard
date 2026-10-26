@@ -1,0 +1,33 @@
+{
+  "model": "C:\\Users\\HP\\Desktop\\plantguard_ml\\artifacts\\dino_leaf_filter\\dino_leaf_filter.pt",
+  "dataset": "C:\\Users\\HP\\Desktop\\plantguard_ml\\data\\processed\\leaf_filter\\training_dataset\\test",
+  "device": "cuda",
+  "threshold": 0.5,
+  "num_test_samples": 1250,
+  "accuracy": 1.0,
+  "precision": 1.0,
+  "recall": 1.0,
+  "f1_score": 1.0,
+  "confusion_matrix": [
+    [
+      500,
+      0
+    ],
+    [
+      0,
+      750
+    ]
+  ],
+  "classes": [
+    "negative",
+    "positive"
+  ],
+  "checkpoint": {
+    "best_epoch": 8,
+    "best_val_accuracy": 1.0,
+    "best_val_loss": 0.0010383738210599403,
+    "test_accuracy": 1.0,
+    "test_loss": 0.0008389828958341241,
+    "image_size": 224
+  }
+}

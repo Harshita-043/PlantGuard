@@ -1,0 +1,226 @@
+"""CPU-safe contract tests with controlled adapters; these are not model accuracy tests."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+from PIL import Image
+
+from app.ml.adapters.disease_segmentation import SegFormerDiseaseSegmentationAdapter
+from app.ml.adapters.leaf_filter import DinoLeafFilterAdapter
+from app.ml.adapters.disease_classifier import DinoDiseaseClassifierAdapter
+from app.ml.adapters.sam_adapter import Sam2LeafSegmentationAdapter
+from app.ml.errors import (
+    InferenceErrorCode,
+    InferenceTimeoutError,
+    InvalidImageError,
+    ModelCapabilityError,
+    NoLeafFoundError,
+    NoDiseaseMaskError,
+)
+from app.ml.service import PlantAnalysisService
+
+
+class FakeAdapter:
+    def __init__(self, name, events, predict):
+        self.name = name
+        self.events = events
+        self._predict = predict
+        self.artifact_path = Path(__file__)  # present: no filesystem/model setup needed
+        self.artifact_version = f"test-{name}"
+        self.loading_status = "ready"
+        self.active_device = "cpu"
+        self.last_error = None
+        self.unloaded = False
+
+    def is_ready(self):
+        return True
+
+    def load(self, device):
+        self.events.append(("load", self.name))
+        return True
+
+    def unload(self):
+        self.unloaded = True
+
+    def preprocess(self, image):
+        assert image.dtype == np.uint8 and image.ndim == 3 and image.shape[2] == 3
+        size = 512 if self.name == "segmenter" else 224
+        return np.zeros((1, 3, size, size), dtype=np.float32)
+
+    def predict(self, value, **kwargs):
+        self.events.append(("predict", self.name))
+        return self._predict(value, **kwargs)
+
+
+def _service(*, masks=2, no_filter=False, segment_mask=None, timeout=2.0):
+    events = []
+    h, w = 80, 100
+    leaf_mask = np.zeros((h, w), dtype=bool)
+    leaf_mask[10:70, 10:45] = True
+    leaf_mask2 = np.zeros((h, w), dtype=bool)
+    leaf_mask2[10:70, 55:90] = True
+    candidate_items = []
+    if masks >= 1:
+        candidate_items.append({"segmentation": leaf_mask, "bbox": [0.125, 0.1, 0.875, 0.45], "area": int(leaf_mask.sum()), "score": .9, "method": "sam2.1_automatic_mask_generator"})
+    if masks >= 2:
+        candidate_items.append({"segmentation": leaf_mask2, "bbox": [0.125, 0.55, 0.875, 0.9], "area": int(leaf_mask2.sum()), "score": .8, "method": "sam2.1_automatic_mask_generator"})
+    sam = FakeAdapter("sam", events, lambda *_a, **_k: candidate_items)
+    leaf = FakeAdapter("leaf", events, lambda *_a, **_k: np.array([[1., 0.]], dtype=np.float32) if no_filter else np.array([[.05, .95]], dtype=np.float32))
+    classifier = FakeAdapter("classifier", events, lambda *_a, **_k: np.eye(1, 38, 3, dtype=np.float32))
+    classifier.get_class_mapping = lambda: {i: f"Crop___class_{i}" for i in range(38)}
+    def classify_with_attention(_x):
+        events.append(("predict", "classifier"))
+        return np.eye(1, 38, 3, dtype=np.float32), np.ones((224, 224), dtype=np.float32)
+    classifier.predict_with_attention = classify_with_attention
+    seg = FakeAdapter("segmenter", events, lambda _input, **kwargs: (segment_mask((kwargs["original_shape"][0], kwargs["original_shape"][1])) if callable(segment_mask)
+                          else segment_mask if segment_mask is not None
+                          else np.zeros(kwargs["original_shape"], dtype=np.uint8)))
+    seg.get_class_mapping = lambda: {0: "background", 1: "diseased_region"}
+    service = PlantAnalysisService(sam=sam, leaf_filter=leaf, classifier=classifier,
+                                   segmenter=seg, device="cpu", timeout_seconds=timeout)
+    return service, events
+
+
+def _image():
+    return np.full((80, 100, 3), 120, dtype=np.uint8)
+
+
+def test_pipeline_order_contracts_and_timing():
+    service, events = _service(masks=1)
+    result = service.analyze(_image(), analysis_id="contract-test")
+    stages = [name for op, name in events if op == "predict"]
+    assert stages == ["sam", "leaf", "classifier", "segmenter"]
+    assert result.analysis_id == "contract-test"
+    assert result.leaves[0].candidate_source == "test-sam"
+    assert result.leaves[0].classification.primary_class == "Crop___class_3"
+    assert result.leaves[0].segmentation.total_leaf_pixels > 0
+    assert set(result.stage_timings_ms) == {"sam2_candidate_generation", "leaf_filter", "classifier", "segmentation_and_severity"}
+    assert result.leaves[0].explainability.method == "dinov2_gradient_weighted_final_layer_attention"
+    assert result.leaves[0].prediction_uncertainty.calibration_status == "incomplete"
+    assert result.plant_summary.recommendations == []
+
+
+def test_multiple_leaf_candidates_are_analyzed():
+    service, _ = _service(masks=2)
+    result = service.analyze(_image())
+    assert len(result.leaves) == 2
+
+
+def test_no_sam_candidates_raises_typed_error_without_fabricating_leaf():
+    service, events = _service(masks=0)
+    with pytest.raises(NoLeafFoundError) as exc:
+        service.analyze(_image())
+    assert exc.value.code == InferenceErrorCode.NO_LEAF_FOUND
+    assert [name for op, name in events if op == "predict"] == ["sam"]
+
+
+def test_candidates_rejected_by_filter_raise_no_leaf():
+    service, _ = _service(masks=1, no_filter=True)
+    with pytest.raises(NoLeafFoundError):
+        service.analyze(_image())
+
+
+@pytest.mark.parametrize("image", [np.zeros((0, 10, 3), dtype=np.uint8), np.zeros((10, 10), dtype=np.uint8), np.zeros((10, 10, 3), dtype=np.float32)])
+def test_invalid_image_contract(image):
+    service, _ = _service()
+    with pytest.raises(InvalidImageError):
+        service.analyze(image)
+
+
+def test_corrupt_encoded_image_raises_typed_error():
+    service, _ = _service()
+    with pytest.raises(InvalidImageError):
+        service.analyze_bytes(b"not an image")
+
+
+def test_missing_model_artifact_is_a_capability_error():
+    service, _ = _service(masks=1)
+    service.sam.is_ready = lambda: False
+    service.sam.artifact_path = Path("missing-sam-checkpoint.pt")
+    with pytest.raises(ModelCapabilityError) as exc:
+        service.analyze(_image())
+    assert exc.value.code == InferenceErrorCode.MISSING_ARTIFACT
+
+
+def test_model_loader_failure_is_typed_and_does_not_continue():
+    service, events = _service(masks=1)
+    service.sam.is_ready = lambda: False
+    service.sam.load = lambda _device: False
+    service.sam.last_error = "CUDA runtime unsupported"
+    with pytest.raises(ModelCapabilityError) as exc:
+        service.analyze(_image())
+    assert exc.value.code == InferenceErrorCode.UNSUPPORTED_RUNTIME
+    assert [event for event in events if event[0] == "predict"] == []
+
+
+def test_incompatible_segformer_config_fails_closed_without_model_import():
+    adapter = SegFormerDiseaseSegmentationAdapter(
+        artifact_path=Path("present-but-not-loaded.safetensors"),
+        config_path=Path("missing-config.json"),
+    )
+    assert adapter.get_class_mapping() == {0: "background", 1: "diseased_region"}
+    assert adapter.load("cpu") is False
+    assert "configuration" in adapter.last_error.lower()
+
+
+def test_invalid_stage_distribution_cannot_become_prediction():
+    service, _ = _service(masks=1)
+    service.leaf_filter._predict = lambda *_a, **_k: np.array([[np.nan, np.nan]])
+    with pytest.raises(Exception) as exc:
+        service.analyze(_image())
+    assert getattr(exc.value, "code", None) == InferenceErrorCode.INVALID_MODEL_OUTPUT
+
+
+def test_inference_capacity_timeout_is_explicit():
+    service, _ = _service(timeout=0.01)
+    assert service._inference_slot.acquire(timeout=0.1)
+    try:
+        with pytest.raises(InferenceTimeoutError):
+            service.analyze(_image())
+    finally:
+        service._inference_slot.release()
+
+
+def test_unloaded_adapters_do_not_return_mock_predictions():
+    service, _ = _service(masks=1)
+    service.leaf_filter.is_ready = lambda: False
+    service.leaf_filter.artifact_path = Path("unavailable-filter.pt")
+    with pytest.raises(ModelCapabilityError):
+        service.analyze(_image())
+
+
+def test_each_unloaded_adapter_fails_without_heuristic_or_mock_success():
+    with pytest.raises(RuntimeError):
+        DinoLeafFilterAdapter().predict(np.zeros((1, 3, 224, 224), dtype=np.float32))
+    with pytest.raises(RuntimeError):
+        DinoDiseaseClassifierAdapter().predict(np.zeros((1, 3, 224, 224), dtype=np.float32))
+    with pytest.raises(RuntimeError):
+        SegFormerDiseaseSegmentationAdapter().predict(np.zeros((1, 3, 512, 512), dtype=np.float32))
+    with pytest.raises(ModelCapabilityError):
+        Sam2LeafSegmentationAdapter().predict(_image())
+
+
+def test_segmentation_rejects_unmapped_class_index():
+    service, _ = _service(masks=1, segment_mask=lambda shape: np.full(shape, 2, dtype=np.uint8))
+    with pytest.raises(Exception) as exc:
+        service.analyze(_image())
+    assert getattr(exc.value, "code", None) == InferenceErrorCode.INVALID_MODEL_OUTPUT
+
+
+def test_missing_disease_mask_uses_specific_typed_error():
+    service, _ = _service(masks=1, segment_mask=None)
+    # Override the default fake empty mask with an absent model output.
+    service.segmenter._predict = lambda *_args, **_kwargs: None
+    with pytest.raises(NoDiseaseMaskError):
+        service.analyze(_image())
+
+
+def test_segformer_mapping_matches_present_training_metadata():
+    adapter = SegFormerDiseaseSegmentationAdapter()
+    assert adapter._configuration_error is None
+    assert adapter.get_class_mapping() == {0: "background", 1: "diseased_region"}
+    assert adapter.get_preprocessing_spec().target_size == (512, 512)
+

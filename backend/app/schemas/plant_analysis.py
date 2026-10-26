@@ -8,6 +8,7 @@ from enum import Enum
 
 
 class SeverityLevel(str, Enum):
+    HEALTHY = "healthy"
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -31,9 +32,10 @@ class LeafResult(BaseModel):
     disease_mask: Optional[List[List[bool]]] = Field(None, description="Binary mask of diseased regions (True=diseased)")
     diseased_area_ratio: float = Field(..., ge=0, le=1, description="Ratio of diseased pixels to total leaf area")
     disease_bounding_box: List[float] = Field(..., min_items=4, max_items=4, description="[x_min, y_min, width, height] of diseased region normalized")
-    severity_score: float = Field(..., ge=0, le=1, description="Severity score (0=healthy, 1=severe)")
-    severity_level: SeverityLevel = Field(..., description="Categorical severity level")
-    affected_percentage: float = Field(..., ge=0, le=100, description="Percentage of leaf affected")
+    severity_status: str = Field(default="available", description="available or unavailable")
+    severity_score: Optional[float] = Field(None, ge=0, le=1, description="Mask-derived severity fraction when available")
+    severity_level: Optional[SeverityLevel] = Field(None, description="Provisional category when available")
+    affected_percentage: Optional[float] = Field(None, ge=0, le=100, description="Mask-derived percentage when available")
     leaf_confidence: Optional[float] = Field(None, ge=0, le=1, description="Confidence in leaf detection")
     explainability_heatmap: Optional[List[List[float]]] = Field(None, description="Grad-CAM heatmap (0-1)")
 

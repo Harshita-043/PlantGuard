@@ -1,0 +1,16 @@
+{
+  "total_candidates": 36984,
+  "positive_leaf_predictions": 26390,
+  "negative_non_leaf_predictions": 10594,
+  "positive_percentage": 71.3551806186459,
+  "negative_percentage": 28.644819381354097,
+  "confidence_buckets": {
+    "high_confidence_leaf_p_ge_0.90": 22555,
+    "medium_confidence_leaf_0.50_to_0.90": 3835,
+    "high_confidence_non_leaf_p_le_0.10": 7087,
+    "uncertain_0.10_to_0.50": 3507
+  },
+  "threshold": 0.5,
+  "model": "C:\\Users\\HP\\Desktop\\plantguard_ml\\artifacts\\dino_leaf_filter\\dino_leaf_filter.pt",
+  "source_manifest": "C:\\Users\\HP\\Desktop\\plantguard_ml\\data\\processed\\leaf_filter\\sam_candidates\\candidates.jsonl"
+}

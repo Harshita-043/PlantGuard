@@ -1,5 +1,13 @@
 # PlantGuard AI Changelog
 
+## 2026-09-25 — Isolated ML runtime foundation (Phase 9)
+
+- Added an isolated, pinned SAM2/CLIP runtime manifest targeting Python 3.12.10; ML packages remain out of the FastAPI backend environment.
+- Repaired standalone SAM2 configuration path resolution, filled missing generator settings with documented upstream API defaults, added safe CPU fallback, and added a load-only SAM2 smoke command.
+- Changed CLIP loading to require the bundled safetensors file with strict `ViT-B-32` state-dict matching; no registry-download fallback is used.
+- Replaced client-filename temporary paths in the standalone image endpoint with generated temporary names and decoded JPEG/PNG/WebP validation capped at 10 MiB.
+- Model load could not be tested on this host: Python 3.12, WSL, PyTorch, SAM2, OpenCLIP, and GPU tooling are unavailable. Checkpoint hashes remained unchanged.
+
 ## 2026-09-25 — Authenticated image persistence lifecycle
 
 - Connected `POST /api/v1/analyze/image` to the configured existing object-storage provider after validating the uploaded image; the client filename is not used for temporary or object paths.

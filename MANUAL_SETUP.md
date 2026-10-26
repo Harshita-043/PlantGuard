@@ -8,7 +8,7 @@ This file records only setup supported by the current repository. The app is a f
 2. From the repository root, create a backend environment file:
 
    ```powershell
-   Copy-Item backend/.env.example backend/.env
+   Copy-Item .env.example backend/.env
    ```
 
    The defaults are local-only. Keep secrets out of source control. `.env` files are ignored.
@@ -33,7 +33,7 @@ This file records only setup supported by the current repository. The app is a f
    alembic upgrade head
    ```
 
-   `alembic upgrade head` applies the complete migration chain: the analyses and users tables, Analysis-to-User ownership, and the required private image object reference. No seed users or Analysis records are created. To roll back only the user-table migration in a disposable development database, run `alembic downgrade 0001_initial_analysis`; this removes all account records. `alembic downgrade base` also removes the analyses table and its data. Never downgrade a database with data you need.
+   `alembic upgrade head` applies the analysis and user-table migrations; no seed users are created. To roll back only the user-table migration in a disposable development database, run `alembic downgrade 0001_initial_analysis`; this removes all account records. `alembic downgrade base` also removes the analyses table and its data. Never downgrade a database with data you need.
 
    Start FastAPI after configuring the database:
 
@@ -56,16 +56,16 @@ This file records only setup supported by the current repository. The app is a f
 
 - `GET http://localhost:8000/api/ping` returns the health ping.
 - `GET http://localhost:8000/docs` exposes FastAPI's generated API documentation.
-- Image uploads create pending records; disease analysis remains unavailable until real ML inference is integrated. Agentic scan endpoints return `503`; video analysis returns `501`.
-- Registration, login, authenticated identity lookup, and frontend sign-in are implemented. Authenticated image uploads create private, owner-scoped pending Analysis records; owner-scoped retrieval and history are available. Real plant inference/results, Plant CRUD, account recovery/email verification, and video analysis are not implemented.
-- PostgreSQL and Alembic are required for account registration/login and image-record persistence. Set `JWT_SECRET_KEY` before using login. Local storage needs no cloud credentials; an LLM account and API key are not required for local development.
+- Image scan and agentic scan endpoints return `503` until actual ML inference is integrated. Video analysis returns `501`.
+- Registration, login, and authenticated identity lookup are implemented at `/api/v1/auth/register`, `/api/v1/auth/login`, and `/api/v1/auth/me`. The SPA has no login UI/token handling. Plant records, scan history, account recovery/email verification, authorization/ownership, and uploaded-media persistence are not implemented. The analysis schema is not yet used by API routes.
+- PostgreSQL and Alembic are required for account registration/login and to apply the analysis schema. Set `JWT_SECRET_KEY` before using login; cloud storage credentials, an LLM account, and an LLM API key are not required for local development.
 
 ## Configure backend authentication
 
-1. In `backend/.env`, set `JWT_SECRET_KEY` to a unique random secret. From Git Bash, run this in the `backend/` directory:
+1. In `backend/.env`, set `JWT_SECRET_KEY` to a unique random secret. Generate one from `backend/` with:
 
-   ```bash
-   ./.venv/Scripts/python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
+   ```powershell
+   .\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
    ```
 
    Keep the generated value only in `backend/.env` or the deployment secret store. Do not commit it or send it in chat. `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` defaults to `30` and can be adjusted up to 1440 minutes.
@@ -76,10 +76,10 @@ This file records only setup supported by the current repository. The app is a f
    alembic upgrade head
    ```
 
-   `alembic upgrade head` applies the full migration chain through `0004_analysis_storage_reference`; that migration adds the required private image object-key column and unique index after `0003_analysis_ownership` adds the owner relationship. Migrations insert no users or Analysis records. Ensure `DATABASE_URL` points at the intended PostgreSQL database.
+   The new migration creates the `users` table; it inserts no accounts. Ensure `DATABASE_URL` points at the intended PostgreSQL database.
 3. Registration accepts an email and a 12–128 character password. Login returns an access token. Send it as `Authorization: Bearer <token>` to `GET /api/v1/auth/me`. The client must discard the token on logout and after expiry; this backend does not issue refresh tokens or provide server-side token revocation.
 
-The SPA provides login and registration and holds the bearer token in tab-scoped session storage. The signing key must contain at least 32 bytes; login and authenticated identity return `503` when it is absent or too short.
+The auth routes are backend-only at this stage; the current frontend has no login/register form or secure token handling. The signing key must contain at least 32 bytes; login and authenticated identity return `503` when it is absent or too short.
 
 ## Storage configuration
 
@@ -89,12 +89,12 @@ Use the default `OBJECT_STORAGE_PROVIDER=local`. Local storage requires no Supab
 
 ### Supabase production storage adapter
 
-The image upload route writes validated images through the provider selected by `OBJECT_STORAGE_PROVIDER`. Supabase Storage is used only when explicitly selected and fully configured; the bucket should remain private. Configuring it does not make image URLs public or expose storage credentials to the frontend.
+Supabase Storage is not used by the current upload or analysis endpoints. Configuring it only enables backend adapter use and the round-trip verification below; API uploads remain temporary.
 
 1. Create or select a Supabase project.
 2. Create a **private** Storage bucket in the project. Do not enable public access or public URLs.
-3. In Storage S3 configuration, enable the S3 protocol and generate server-side S3 access keys. Copy the endpoint and region shown there. Supabase documents that these credentials provide full S3 access across buckets and bypass Storage RLS; keep them only in the backend environment. Image reads are not exposed through an API route. See [Supabase S3 authentication](https://supabase.com/docs/guides/storage/s3/authentication).
-4. Copy `backend/.env.example` to `backend/.env` if needed and set:
+3. In Storage S3 configuration, enable the S3 protocol and generate server-side S3 access keys. Copy the endpoint and region shown there. Supabase documents that these credentials provide full S3 access across buckets and bypass Storage RLS; keep them only in the backend environment and do not store user data until ownership controls are implemented. See [Supabase S3 authentication](https://supabase.com/docs/guides/storage/s3/authentication).
+4. Copy `.env.example` to `backend/.env` if needed and set:
 
    ```dotenv
    OBJECT_STORAGE_PROVIDER=supabase
@@ -115,9 +115,9 @@ The image upload route writes validated images through the provider selected by 
    storage = create_object_storage()
    key = None
    try:
-       key = storage.put(b"plantguard-storage-check", content_type="text/plain")
+       key = storage.put(b"plantguard-r2-check", content_type="text/plain")
        assert storage.exists(key)
-       assert storage.get(key).content == b"plantguard-storage-check"
+       assert storage.get(key).content == b"plantguard-r2-check"
        print("Configured object storage round trip passed")
    finally:
        if key is not None:
@@ -149,8 +149,8 @@ The backend test suite requires pytest and a compatible TestClient dependency. M
 
 ## Verification checklist
 
-- [ ] Copy `backend/.env.example` to `backend/.env` and `frontend/.env.example` to `frontend/.env`.
-- [ ] Install/start PostgreSQL, create `plantguard`, configure `DATABASE_URL`, and run `alembic upgrade head` (applies analyses, users, ownership, and the private image object reference through `0004_analysis_storage_reference`).
+- [ ] Copy `.env.example` to `backend/.env` and `frontend/.env.example` to `frontend/.env`.
+- [ ] Install/start PostgreSQL, create `plantguard`, configure `DATABASE_URL`, and run `alembic upgrade head` (creates `analyses` and `users`).
 - [ ] Generate and configure a private `JWT_SECRET_KEY` in `backend/.env` before testing login.
 - [ ] Start FastAPI and confirm `GET /api/ping` returns `{"message":"pong"}`.
 - [ ] Start Vite on port `8080` and confirm the frontend renders.

@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import logging
 
 # Import API routers
-from app.api import scans, health
+from app.api import admin, scans, health
 from app.api.v1 import analyze
 from app.api.v1 import agentic
 from app.api.v1 import auth
@@ -50,6 +50,7 @@ app.add_middleware(
 
 # Include API routers
 app.include_router(health.router, prefix="/api", tags=["health"])
+app.include_router(admin.router, prefix="/api")
 app.include_router(scans.router, prefix="/api", tags=["scans"])
 app.include_router(analyze.router, prefix="/api/v1", tags=["analysis"])
 app.include_router(agentic.router, prefix="/api/v1", tags=["agentic"])

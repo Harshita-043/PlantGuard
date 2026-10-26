@@ -4,21 +4,26 @@ import logging
 import os
 import tempfile
 import warnings
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from PIL import Image, UnidentifiedImageError
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.v1.auth import get_current_user
 from app.api.v1.ownership import get_owned_analysis
 from app.core.database import get_db
+from app.core.config import settings
 from app.models.analysis import Analysis
 from app.models.user import User
 from app.schemas.analysis_lifecycle import AnalysisLifecycleResponse
+from app.ml.errors import InferenceError
 from app.schemas.plant_analysis import PlantAnalysisResponse
+from app.services.plant_analysis_service import create_plant_analysis_service
 from app.storage import ObjectStorage, StorageConfigurationError, StorageError, create_object_storage
 
 
@@ -43,7 +48,7 @@ async def analyze_image(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> AnalysisLifecycleResponse:
-    """Validate, privately store, and record an image without claiming inference."""
+    """Validate, privately store, run the configured real pipeline, and persist its result."""
     try:
         image_content, content_type = await _read_validated_image(file)
     finally:
@@ -85,7 +90,6 @@ async def analyze_image(
     db.add(analysis)
     try:
         db.flush()
-        response = _lifecycle_response(analysis)
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -105,7 +109,63 @@ async def analyze_image(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not persist the uploaded analysis",
         ) from exc
-    return response
+
+    try:
+        # Inference is synchronous but runs off the ASGI event loop. The model
+        # service loads one stage at a time and enforces its process-wide slot.
+        application_service = (
+            create_plant_analysis_service()
+            if settings.PLANTGUARD_INFERENCE_PROFILE == "remote"
+            else create_plant_analysis_service(storage=storage)
+        )
+        result = await run_in_threadpool(
+            application_service.inference.analyze_bytes,
+            image_content,
+            analysis_id=str(analysis_id),
+        )
+        analysis.status = "completed"
+        analysis.result_data = result.model_dump(mode="json")
+        analysis.processing_time_ms = result.processing_time_ms
+        analysis.completed_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(analysis)
+    except InferenceError as exc:
+        db.rollback()
+        failed = db.get(Analysis, analysis_id)
+        if failed is not None:
+            failed.status = "failed"
+            failed.completed_at = datetime.now(timezone.utc)
+            db.commit()
+        logger.warning(
+            "Plant inference failed analysis_id=%s stage=%s error_code=%s",
+            analysis_id, exc.stage, exc.code,
+        )
+        public_message = (
+            "The configured model or runtime is unavailable"
+            if exc.code in {
+                "missing_artifact", "unsupported_runtime", "artifact_integrity", "resource_limit"
+            }
+            else "Plant analysis could not be completed"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"analysis_id": str(analysis_id), "code": str(exc.code),
+                    "stage": exc.stage, "message": public_message},
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        failed = db.get(Analysis, analysis_id)
+        if failed is not None:
+            failed.status = "failed"
+            failed.completed_at = datetime.now(timezone.utc)
+            db.commit()
+        logger.exception("Unexpected plant inference failure analysis_id=%s", analysis_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"analysis_id": str(analysis_id), "code": "inference_internal_error",
+                    "message": "Plant analysis failed"},
+        ) from exc
+    return _lifecycle_response(analysis)
 
 
 @router.get("/analysis/{analysis_id}", response_model=AnalysisLifecycleResponse)
@@ -138,7 +198,7 @@ def get_analyses(
 async def analyze_video(
     file: UploadFile = File(...),
 ):
-    """Video analysis is not integrated in this repository."""
+    """Video inference is not yet supported by the model pipeline."""
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail="Video analysis is not available until verified video inference is integrated",
@@ -147,11 +207,12 @@ async def analyze_video(
 
 @router.get("/analyze/health")
 async def analysis_health():
-    """Report that real plant inference remains unavailable."""
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Plant analysis is unavailable because no ML implementation is integrated",
-    )
+    """Report configured pipeline capability without loading model weights."""
+    service = create_plant_analysis_service()
+    if not service.is_ready():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Configured model artifacts or runtime are unavailable")
+    return {"status": "ready", "pipeline": "sam2_dinov2_segformer"}
 
 
 async def _read_validated_image(file: UploadFile) -> tuple[bytes, str]:
@@ -220,6 +281,7 @@ def _lifecycle_response(analysis: Analysis) -> AnalysisLifecycleResponse:
         image_content_type=analysis.image_content_type,
         image_size_bytes=analysis.image_size_bytes,
         result_available=analysis.result_data is not None,
+        result=analysis.result_data,
     )
 
 

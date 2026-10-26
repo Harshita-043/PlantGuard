@@ -32,6 +32,18 @@ class Settings(BaseSettings):
     SUPABASE_STORAGE_SECRET_ACCESS_KEY: Optional[SecretStr] = None
     JWT_SECRET_KEY: Optional[SecretStr] = None
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, gt=0, le=1440)
+    PLANTGUARD_DEVICE: Literal["auto", "cpu", "cuda", "cuda:0"] = "auto"
+    PLANTGUARD_INFERENCE_PROFILE: Literal["auto", "cpu", "cuda", "remote"] = "auto"
+    PLANTGUARD_CPU_MEMORY_LIMIT_GB: Optional[float] = Field(default=None, gt=0)
+    PLANTGUARD_CUDA_MEMORY_LIMIT_GB: Optional[float] = Field(default=None, gt=0)
+    PLANTGUARD_MAX_CONCURRENCY: int = Field(default=1, ge=1, le=8)
+    PLANTGUARD_REMOTE_INFERENCE_URL: Optional[str] = None
+    PLANTGUARD_REMOTE_INFERENCE_TOKEN: Optional[SecretStr] = None
+    PLANTGUARD_REMOTE_IMAGE_UPLOAD_AUTHORIZED: bool = False
+    PLANTGUARD_REMOTE_MAX_IMAGE_BYTES: int = Field(default=10 * 1024 * 1024, gt=0, le=50 * 1024 * 1024)
+    PLANTGUARD_REMOTE_TIMEOUT_SECONDS: float = Field(default=60, gt=0, le=300)
+    PLANTGUARD_REMOTE_MAX_CONCURRENCY: int = Field(default=1, ge=1, le=8)
+    PLANTGUARD_DIAGNOSTICS_TOKEN: Optional[SecretStr] = None
 
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env")
 
