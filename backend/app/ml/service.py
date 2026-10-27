@@ -13,13 +13,20 @@ from typing import Callable, Iterable
 from uuid import uuid4
 
 import numpy as np
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.ml.adapters.disease_classifier import DinoDiseaseClassifierAdapter
 from app.ml.adapters.disease_segmentation import SegFormerDiseaseSegmentationAdapter
 from app.ml.adapters.leaf_filter import DinoLeafFilterAdapter
 from app.ml.adapters.sam_adapter import Sam2LeafSegmentationAdapter
-from app.ml.contracts import LeafCandidate
+from app.ml.contracts import (
+    DiseasePrediction,
+    LeafCandidate,
+    LeafFilterScore,
+    SegmentationPrediction,
+    StageMetadata,
+    StageOutput,
+)
 from app.ml.device import device_manager
 from app.ml.errors import (
     InferenceError,
@@ -81,10 +88,10 @@ class PlantAnalysisService:
         candidate_limit: int | None = None,
         variant_preference: str = "automatic",
     ):
-        self.sam = sam or Sam2LeafSegmentationAdapter()
-        self.leaf_filter = leaf_filter or DinoLeafFilterAdapter()
-        self.classifier = classifier or DinoDiseaseClassifierAdapter()
-        self.segmenter = segmenter or SegFormerDiseaseSegmentationAdapter()
+        self.sam = sam if sam is not None else Sam2LeafSegmentationAdapter()
+        self.leaf_filter = leaf_filter if leaf_filter is not None else DinoLeafFilterAdapter()
+        self.classifier = classifier if classifier is not None else DinoDiseaseClassifierAdapter()
+        self.segmenter = segmenter if segmenter is not None else SegFormerDiseaseSegmentationAdapter()
         model_registry.register_adapter("leaf_filter", self.leaf_filter)
         model_registry.register_adapter("disease_classifier", self.classifier)
         model_registry.register_adapter("disease_segmentation", self.segmenter)
@@ -127,7 +134,8 @@ class PlantAnalysisService:
                     raise InvalidImageError("Image dimensions exceed the supported limit")
                 if im.width * im.height > MAX_IMAGE_PIXELS:
                     raise InvalidImageError("Image pixel count exceeds the supported limit")
-                image = np.asarray(im.convert("RGB"), dtype=np.uint8)
+                oriented = ImageOps.exif_transpose(im)
+                image = np.asarray(oriented.convert("RGB"), dtype=np.uint8)
         except InvalidImageError:
             raise
         except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
@@ -146,12 +154,13 @@ class PlantAnalysisService:
         warnings: list[PipelineWarning] = []
         leaves: list[SingleLeafAnalysis] = []
         try:
-            candidates = self._sam_candidates(image, timings)
+            candidate_output = self._sam_candidates(image, timings)
+            candidates = candidate_output.value
             if not candidates:
                 raise NoLeafFoundError()
 
             # Candidate filtering. A candidate's segmentation is always the SAM mask.
-            accepted: list[tuple[LeafCandidate, np.ndarray, float]] = []
+            accepted: list[tuple[LeafCandidate, np.ndarray, LeafFilterScore]] = []
             t0 = time.perf_counter()
             def filter_candidates(adapter):
                 for candidate in candidates:
@@ -159,8 +168,10 @@ class PlantAnalysisService:
                     model_input = self._validated_input(adapter.preprocess(crop), (1, 3, 224, 224), "leaf_filter")
                     probs = self._probabilities(adapter.predict(model_input), 2, "leaf_filter")
                     confidence = float(probs[0, 1])
-                    if confidence >= 0.5:
-                        accepted.append((candidate, crop, confidence))
+                    score = LeafFilterScore(confidence=confidence, accepted=confidence >= 0.5,
+                                             model_version=adapter.artifact_version)
+                    if score.accepted:
+                        accepted.append((candidate, crop, score))
             self._with_model(self.leaf_filter, "leaf_filter", filter_candidates)
             timings["leaf_filter"] = self._elapsed(t0)
             logger.info("inference_stage_complete stage=leaf_filter candidates=%d accepted=%d runtime=%s model=%s duration_ms=%d",
@@ -169,7 +180,7 @@ class PlantAnalysisService:
                 raise NoLeafFoundError("SAM2 candidates did not pass the DINOv2 ViT-S/14 leaf filter")
 
             # DINOv2 ViT-B/14 classifies only accepted leaf crops.
-            predictions: list[tuple[tuple[LeafCandidate, np.ndarray, float], np.ndarray, np.ndarray | None]] = []
+            predictions: list[tuple[tuple[LeafCandidate, np.ndarray, LeafFilterScore], DiseasePrediction, np.ndarray | None]] = []
             t0 = time.perf_counter()
             def classify(adapter):
                 class_map = adapter.get_class_mapping() or {}
@@ -189,7 +200,17 @@ class PlantAnalysisService:
                                            self.device, adapter.artifact_version, type(exc).__name__)
                     else:
                         probs = adapter.predict(model_input)
-                    predictions.append((accepted_item, self._probabilities(probs, 38, "classifier"), attention))
+                    distribution = self._probabilities(probs, 38, "classifier")
+                    class_index = int(np.argmax(distribution[0]))
+                    class_name = class_map[class_index]
+                    prediction = DiseasePrediction(
+                        class_index=class_index,
+                        class_name=class_name,
+                        confidence=float(distribution[0, class_index]),
+                        probabilities=tuple(float(p) for p in distribution[0]),
+                        model_version=adapter.artifact_version,
+                    )
+                    predictions.append((accepted_item, prediction, attention))
             self._with_model(self.classifier, "classifier", classify)
             timings["classifier"] = self._elapsed(t0)
             logger.info("inference_stage_complete stage=classifier leaves=%d runtime=%s model=%s duration_ms=%d",
@@ -203,8 +224,9 @@ class PlantAnalysisService:
                 if mapping != {0: "background", 1: "diseased_region"}:
                     raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
                                          "SegFormer label mapping does not match the PlantSeg checkpoint", stage="segmentation")
-                for idx, (accepted_item, probs, attention) in enumerate(predictions):
-                    candidate, crop, leaf_confidence = accepted_item
+                for idx, (accepted_item, prediction, attention) in enumerate(predictions):
+                    candidate, crop, filter_score = accepted_item
+                    leaf_confidence = filter_score.confidence
                     model_input = self._validated_input(adapter.preprocess(crop), (1, 3, 512, 512), "segmentation")
                     raw_mask = adapter.predict(model_input, original_shape=crop.shape[:2])
                     if raw_mask is None:
@@ -225,20 +247,25 @@ class PlantAnalysisService:
                         leaf_mask = np.asarray(PILImage.fromarray(leaf_mask.astype(np.uint8) * 255).resize(
                             (disease_mask.shape[1], disease_mask.shape[0]), PILImage.Resampling.NEAREST
                         )) > 0
-                    disease_mask = ((disease_mask == 1) & leaf_mask).astype(np.uint8)
+                    segmentation_prediction = SegmentationPrediction(
+                        class_mask=disease_mask,
+                        label_mapping=dict(mapping),
+                        model_version=adapter.artifact_version,
+                    )
+                    disease_mask = ((segmentation_prediction.class_mask == 1) & leaf_mask).astype(np.uint8)
                     if not np.any(leaf_mask):
                         raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
                                              "SAM2 leaf mask became empty after crop alignment", stage="segmentation")
 
                     class_map = self.classifier.get_class_mapping()
-                    class_index = int(np.argmax(probs[0]))
-                    primary = class_map[class_index]
+                    probs = np.asarray([prediction.probabilities], dtype=np.float32)
+                    primary = prediction.class_name
                     top_ids = np.argsort(probs[0])[::-1][:5]
                     top_k = {class_map[int(i)]: round(float(probs[0, i]), 4) for i in top_ids}
                     crop_name, _, disease_name = primary.partition("___")
                     classification = ClassificationResult(
                         primary_class=primary,
-                        confidence=float(probs[0, class_index]),
+                        confidence=prediction.confidence,
                         is_healthy="healthy" in primary.lower(),
                         crop_type=crop_name,
                         disease_name=disease_name.replace("_", " "),
@@ -325,7 +352,9 @@ class PlantAnalysisService:
             leaves = segmented
             warnings.extend(w for leaf in leaves for w in leaf.warnings)
             summary = self._summary(leaves)
-            status = "partial" if warnings else "completed"
+            # Warnings describe uncalibrated or unavailable optional signals;
+            # they do not mean a required inference stage failed.
+            status = "completed"
             return FullScanResult(
                 analysis_id=scan_id,
                 status=status,
@@ -356,7 +385,7 @@ class PlantAnalysisService:
         finally:
             self._inference_slot.release()
 
-    def _sam_candidates(self, image: np.ndarray, timings: dict[str, int]) -> list[LeafCandidate]:
+    def _sam_candidates(self, image: np.ndarray, timings: dict[str, int]) -> StageOutput[tuple[LeafCandidate, ...]]:
         t0 = time.perf_counter()
         raw_candidates: list[LeafCandidate] = []
         def generate(adapter):
@@ -389,7 +418,15 @@ class PlantAnalysisService:
         logger.info("inference_stage_complete stage=sam2 candidates=%d runtime=%s model=%s duration_ms=%d",
                     len(raw_candidates), self.device, self.sam.artifact_version,
                     timings["sam2_candidate_generation"])
-        return raw_candidates
+        return StageOutput(
+            value=tuple(raw_candidates),
+            metadata=StageMetadata(
+                stage="sam2_candidate_generation",
+                model_version=self.sam.artifact_version,
+                runtime=self.device,
+                duration_ms=timings["sam2_candidate_generation"],
+            ),
+        )
 
     def _with_model(self, adapter, stage: str, operation: Callable) -> None:
         loaded_here = not adapter.is_ready()
@@ -466,10 +503,14 @@ class PlantAnalysisService:
     @staticmethod
     def _loading_error(adapter, stage: str, cause: Exception | None = None) -> ModelCapabilityError:
         detail = str(cause or adapter.last_error or "model failed to load")
-        unsupported = any(s in detail.lower() for s in ("not installed", "import", "cuda", "unsupported", "device"))
-        code = InferenceErrorCode.UNSUPPORTED_RUNTIME if unsupported else InferenceErrorCode.MODEL_FAILURE
-        if "missing" in detail.lower() or "not found" in detail.lower():
-            code = InferenceErrorCode.MISSING_ARTIFACT
+        code = getattr(adapter, "load_error_code", None)
+        if not isinstance(code, InferenceErrorCode):
+            if isinstance(cause, ImportError):
+                code = InferenceErrorCode.UNSUPPORTED_RUNTIME
+            elif getattr(adapter, "_configuration_error", None):
+                code = InferenceErrorCode.INVALID_CONFIGURATION
+            else:
+                code = InferenceErrorCode.MODEL_FAILURE
         return ModelCapabilityError(code, f"{stage} model is unavailable: {detail}", stage=stage)
 
     @staticmethod

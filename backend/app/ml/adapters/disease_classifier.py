@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
+from app.ml.errors import InferenceErrorCode
 
 from app.ml.interfaces.adapter import (
     BaseModelAdapter,
@@ -119,9 +120,11 @@ class DinoDiseaseClassifierAdapter(BaseModelAdapter):
         self.loading_status = ModelLoadingStatus.LOADING
         self.active_device = target_device
         self.last_error = None
+        self.load_error_code = None
 
         if not self.artifact_path.exists():
             self.last_error = f"Artifact not found at {self.artifact_path}"
+            self.load_error_code = InferenceErrorCode.MISSING_ARTIFACT
             self.loading_status = ModelLoadingStatus.FAILED
             logger.warning(self.last_error)
             return False
@@ -151,11 +154,13 @@ class DinoDiseaseClassifierAdapter(BaseModelAdapter):
             return True
         except ImportError as e:
             self.last_error = f"PyTorch import failed: {e}"
+            self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
             self.loading_status = ModelLoadingStatus.FAILED
             logger.warning(self.last_error)
             return False
         except Exception as exc:
             self.last_error = f"Failed to load DINOv2 disease classifier: {exc}"
+            self.load_error_code = InferenceErrorCode.MODEL_FAILURE
             self.loading_status = ModelLoadingStatus.FAILED
             logger.error(self.last_error)
             return False

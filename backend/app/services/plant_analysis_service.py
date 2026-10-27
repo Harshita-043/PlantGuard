@@ -6,7 +6,14 @@ from pathlib import Path
 
 import numpy as np
 
-from app.ml.errors import InferenceError, InferenceErrorCode
+from app.ml.errors import InferenceError, InferenceErrorCode, ModelCapabilityError
+
+
+class MLCapabilityUnavailable(ModelCapabilityError):
+    """Backward-compatible typed capability error for legacy agent routes."""
+
+    def __init__(self, message: str):
+        super().__init__(InferenceErrorCode.UNSUPPORTED_RUNTIME, message, stage="agent")
 from app.ml.service import PlantAnalysisService as ModelInferenceService
 from app.ml.remote import RemoteInferenceClient, probe_remote_health
 from app.core.config import settings
@@ -42,7 +49,7 @@ class ApplicationPlantAnalysisService(PlantAnalysisService):
         if isinstance(self.inference, RemoteInferenceClient):
             token = settings.PLANTGUARD_REMOTE_INFERENCE_TOKEN
             return bool(token and probe_remote_health(settings.PLANTGUARD_REMOTE_INFERENCE_URL or "",
-                                                      token.get_secret_value()))
+                                                      token.get_secret_value()) == "available")
         adapters = (
             self.inference.sam, self.inference.leaf_filter, self.inference.classifier, self.inference.segmenter
         )

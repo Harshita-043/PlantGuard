@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 import numpy as np
 from PIL import Image
+from app.ml.errors import InferenceErrorCode
 
 from app.ml.interfaces.adapter import (
     BaseModelAdapter,
@@ -133,14 +134,17 @@ class SegFormerDiseaseSegmentationAdapter(BaseModelAdapter):
         self.loading_status = ModelLoadingStatus.LOADING
         self.active_device = target_device
         self.last_error = None
+        self.load_error_code = None
 
         if self._configuration_error:
             self.last_error = f"Invalid SegFormer configuration: {self._configuration_error}"
+            self.load_error_code = InferenceErrorCode.INVALID_CONFIGURATION
             self.loading_status = ModelLoadingStatus.FAILED
             return False
 
         if not self.artifact_path.exists():
             self.last_error = f"Artifact not found at {self.artifact_path}"
+            self.load_error_code = InferenceErrorCode.MISSING_ARTIFACT
             self.loading_status = ModelLoadingStatus.FAILED
             logger.warning(self.last_error)
             return False
@@ -163,11 +167,13 @@ class SegFormerDiseaseSegmentationAdapter(BaseModelAdapter):
             return True
         except ImportError as e:
             self.last_error = f"Transformers/PyTorch import failed: {e}"
+            self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
             self.loading_status = ModelLoadingStatus.FAILED
             logger.warning(self.last_error)
             return False
         except Exception as exc:
             self.last_error = f"Failed to load SegFormer safetensors: {exc}"
+            self.load_error_code = InferenceErrorCode.MODEL_FAILURE
             self.loading_status = ModelLoadingStatus.FAILED
             logger.error(self.last_error)
             return False
@@ -197,6 +203,11 @@ class SegFormerDiseaseSegmentationAdapter(BaseModelAdapter):
                 tensor_in = torch.from_numpy(preprocessed_input).to(self.active_device)
                 outputs = self._model(pixel_values=tensor_in)
                 logits = outputs.logits  # shape: (1, 2, 128, 128)
+                if (not isinstance(logits, torch.Tensor) or logits.ndim != 4 or logits.shape[0] != 1
+                        or logits.shape[1] != len(self._class_mapping) or not torch.isfinite(logits).all()):
+                    raise RuntimeError("SegFormer logits must be finite with shape (1, mapped_classes, h, w)")
+                if target_h <= 0 or target_w <= 0:
+                    raise ValueError("SegFormer output dimensions must be positive")
 
                 # Bilinearly interpolate logits directly to the target shape
                 upsampled = torch.nn.functional.interpolate(

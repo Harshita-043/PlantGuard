@@ -58,6 +58,95 @@ export interface AnalysisLifecycleResponse {
   image_content_type: string;
   image_size_bytes: number;
   result_available: boolean;
+  /** Present only when inference completed successfully. */
+  result: FullScanResult | null;
+  failure: { code: string; stage: string; message: string; occurred_at: string } | null;
+}
+
+export interface AnalysisAssetLink {
+  storage_key: string;
+  kind: "original" | "artifact";
+  download_url: string;
+  expires_in_seconds: number | null;
+}
+
+export interface AnalysisAssetsResponse {
+  analysis_id: string;
+  assets: AnalysisAssetLink[];
+}
+
+export interface MaskAsset {
+  storage_key: string;
+  content_type: string;
+  width: number;
+  height: number;
+  byte_size: number | null;
+  download_url: string | null;
+}
+export interface PipelineWarning {
+  code: string;
+  message: string;
+  component: string;
+  severity: "info" | "warning" | "critical";
+}
+
+export interface FullScanResult {
+  schema_version: string;
+  analysis_id: string;
+  timestamp: string;
+  status: string;
+  hardware_device: string;
+  processing_time_ms: number;
+  model_versions: Record<string, string>;
+  stage_timings_ms: Record<string, number>;
+  model_load_timings_ms: Record<string, number>;
+  leaves: SingleLeafAnalysis[];
+  plant_summary: PlantHealthSummaryV2;
+  warnings: PipelineWarning[];
+  partial_failures: Array<{ component: string; error_type: string; message: string; fallback_applied: boolean }>;
+}
+
+export interface PlantHealthSummaryV2 {
+  overall_health_score: number;
+  health_status: "healthy" | "mildly_diseased" | "severely_diseased" | "unknown";
+  total_leaves_detected: number;
+  valid_leaves_analyzed: number;
+  healthy_leaves_count: number;
+  diseased_leaves_count: number;
+  primary_diagnosis: string | null;
+  disease_breakdown: Record<string, number>;
+  average_severity_percentage: number;
+  recommendations: string[];
+}
+
+export interface SingleLeafAnalysis {
+  leaf_id: number;
+  bounding_box: [number, number, number, number];
+  is_leaf: boolean;
+  leaf_filter_confidence: number;
+  candidate_score: number;
+  candidate_source: string;
+  leaf_mask_asset: MaskAsset | null;
+  classification: {
+    primary_class: string; confidence: number; is_healthy: boolean;
+    crop_type: string | null; disease_name: string | null; top_k_probabilities: Record<string, number>;
+  } | null;
+  ood: { score: number; threshold: number; is_ood: boolean; method: string; calibration_status: string } | null;
+  segmentation: {
+    has_lesions: boolean; diseased_pixels: number; total_leaf_pixels: number;
+    diseased_ratio: number; disease_bounding_box: number[] | null; mask_asset: MaskAsset | null;
+  } | null;
+  severity: {
+    status: string; method: string; score: number | null; level: "healthy" | "low" | "medium" | "high" | null;
+    affected_percentage: number | null; diseased_leaf_pixels: number | null; valid_leaf_pixels: number | null;
+    thresholds_validated: boolean; assessment: string;
+  } | null;
+  explainability: { status: string; method: string; description: string | null; heatmap_asset: MaskAsset | null } | null;
+  prediction_uncertainty: {
+    score: number; threshold: number; is_high_uncertainty: boolean;
+    classification_confidence: number; method: string; calibration_status: string;
+  } | null;
+  warnings: PipelineWarning[];
 }
 
 /** Public account fields returned by the FastAPI authentication endpoints. */

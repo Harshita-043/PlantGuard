@@ -36,6 +36,17 @@ class LocalFileObjectStorage:
         except OSError as exc:
             raise StorageError("Could not initialize the local storage root") from exc
 
+    def check_ready(self) -> bool:
+        """Check the configured private root is available for reads and writes."""
+        try:
+            return self._root.is_dir() and os.access(self._root, os.R_OK | os.W_OK)
+        except OSError:
+            return False
+    def create_download_url(self, object_key: str, *, expires_in: int = 300) -> str | None:
+        """Local files are served through the authenticated analysis asset endpoint."""
+        validate_object_key(object_key)
+        return None
+
     def put(
         self,
         content: bytes,

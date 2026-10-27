@@ -15,7 +15,15 @@ class StoredObject:
 
 
 class ObjectStorage(Protocol):
-    """Minimal storage operations currently justified by image handling."""
+    """Private storage operations required by the API lifecycle."""
+
+    def check_ready(self) -> bool:
+        """Probe provider access without reading or writing user objects."""
+        ...
+
+    def create_download_url(self, object_key: str, *, expires_in: int = 300) -> str | None:
+        """Create a short-lived provider URL, or None when an authenticated API proxy is needed."""
+        ...
 
     def put(
         self,

@@ -9,6 +9,7 @@ class InferenceErrorCode(StrEnum):
     INVALID_IMAGE = "invalid_image"
     INVALID_MODEL_OUTPUT = "invalid_model_output"
     ARTIFACT_INTEGRITY = "artifact_integrity"
+    INVALID_CONFIGURATION = "invalid_configuration"
     RESOURCE_LIMIT = "resource_limit"
     REMOTE_FAILURE = "remote_failure"
     NO_LEAF_FOUND = "no_leaf_found"

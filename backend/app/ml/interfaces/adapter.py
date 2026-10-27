@@ -78,6 +78,9 @@ class BaseModelAdapter(ABC):
         self.loading_status = ModelLoadingStatus.UNLOADED
         self.active_device: Optional[str] = None
         self.last_error: Optional[str] = None
+        # Adapters may report a machine-readable load failure. The service does
+        # not guess error categories by searching human-readable error strings.
+        self.load_error_code = None
 
     @abstractmethod
     def get_input_contract(self) -> ContractSpec:

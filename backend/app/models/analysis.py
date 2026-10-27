@@ -36,6 +36,7 @@ class Analysis(Base):
     image_content_type: Mapped[str] = mapped_column(String(32), nullable=False)
     image_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     result_data: Mapped[dict[str, Any] | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
+    failure_data: Mapped[dict[str, Any] | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
     processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

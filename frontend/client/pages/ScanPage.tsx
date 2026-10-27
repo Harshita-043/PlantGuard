@@ -50,6 +50,10 @@ export default function ScanPage() {
         navigate("/login", { replace: true });
         return;
       }
+      if (caught instanceof ApiError && caught.analysisId) {
+        navigate(`/scan/results/${encodeURIComponent(caught.analysisId)}`);
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "The image could not be uploaded.");
     } finally {
       setIsUploading(false);
@@ -64,7 +68,7 @@ export default function ScanPage() {
         </span>
         <h2 className="text-2xl font-semibold tracking-[-0.04em]">Save a plant image</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          The image will be validated and saved to your account. Disease analysis is not available yet.
+          The image is saved to your account and analyzed when the configured model runtime and artifacts are available.
         </p>
       </div>
 
@@ -90,7 +94,7 @@ export default function ScanPage() {
       )}
 
       <Button onClick={() => void handleUpload()} disabled={!imageFile || isUploading || !accessToken} className="w-full">
-        {isUploading ? <><Loader size={16} className="mr-2 animate-spin" />Saving image…</> : "Save image and create analysis record"}
+        {isUploading ? <><Loader size={16} className="mr-2 animate-spin" />Analyzing image…</> : "Analyze plant image"}
       </Button>
     </section>
   );

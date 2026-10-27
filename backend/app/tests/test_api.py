@@ -2,6 +2,9 @@
 Test the API endpoints
 """
 from fastapi.testclient import TestClient
+from types import SimpleNamespace
+
+from app.api.v1 import analyze
 from app.main import app
 
 client = TestClient(app)
@@ -22,11 +25,30 @@ def test_demo_endpoint():
 
 
 def test_analysis_health_endpoint():
-    """Analysis cannot claim healthy when no inference service is integrated."""
+    """Analysis health does not claim model readiness when prerequisites are absent."""
     response = client.get("/api/v1/analyze/health")
     assert response.status_code == 503
     data = response.json()
-    assert "no ML implementation is integrated" in data["detail"]
+    assert data["detail"] == {
+        "status": "unavailable",
+        "inference_available": False,
+        "code": "model_prerequisites_unavailable",
+        "message": "Configured model artifacts or runtime are unavailable",
+    }
+
+
+def test_analysis_health_never_equates_prerequisites_with_verified_inference(monkeypatch):
+    monkeypatch.setattr(analyze, "create_plant_analysis_service",
+                        lambda: SimpleNamespace(is_ready=lambda: True))
+    response = client.get("/api/v1/analyze/health")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "status": "unverified",
+        "inference_available": False,
+        "code": "model_validation_required",
+        "message": "Model prerequisites are present, but checkpoint integrity and real inference have not been verified",
+    }
 
 
 def test_root_endpoint():

@@ -9,7 +9,7 @@ export default function Index() {
       </span>
       <h2 className="mt-5 text-2xl font-semibold tracking-[-0.04em]">PlantGuard AI</h2>
       <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
-        This repository currently has no account, plant, scan-history, or weather data services. Plant analysis is unavailable until real ML inference is integrated.
+        Upload and review account-owned plant scan records. Inference results appear when the configured model artifacts and runtime are available.
       </p>
       <div className="mt-6 flex flex-wrap justify-center gap-3">
         <Link to="/scan" className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground">

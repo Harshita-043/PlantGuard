@@ -20,6 +20,7 @@ from app.ml.errors import (
     NoLeafFoundError,
     NoDiseaseMaskError,
 )
+from app.ml.contracts import DiseasePrediction, LeafCandidate, LeafFilterScore, SegmentationPrediction, StageMetadata, StageOutput
 from app.ml.service import PlantAnalysisService
 
 
@@ -33,6 +34,7 @@ class FakeAdapter:
         self.loading_status = "ready"
         self.active_device = "cpu"
         self.last_error = None
+        self.load_error_code = None
         self.unloaded = False
 
     def is_ready(self):
@@ -135,6 +137,23 @@ def test_corrupt_encoded_image_raises_typed_error():
     with pytest.raises(InvalidImageError):
         service.analyze_bytes(b"not an image")
 
+def test_encoded_image_exif_orientation_is_applied_before_inference(monkeypatch):
+    service, _ = _service()
+    original = Image.new("RGB", (2, 3), color=(20, 40, 60))
+    exif = original.getexif()
+    exif[274] = 6  # Rotate 90 degrees clockwise for display.
+    encoded = __import__("io").BytesIO()
+    original.save(encoded, format="JPEG", exif=exif)
+    captured = []
+    monkeypatch.setattr(service, "analyze", lambda image, analysis_id=None: captured.append(image.copy()) or "decoded")
+
+    result = service.analyze_bytes(encoded.getvalue(), analysis_id="orientation-test")
+
+    assert result == "decoded"
+    assert len(captured) == 1
+    assert captured[0].shape == (2, 3, 3)
+    assert captured[0].dtype == np.uint8
+
 
 def test_missing_model_artifact_is_a_capability_error():
     service, _ = _service(masks=1)
@@ -150,6 +169,7 @@ def test_model_loader_failure_is_typed_and_does_not_continue():
     service.sam.is_ready = lambda: False
     service.sam.load = lambda _device: False
     service.sam.last_error = "CUDA runtime unsupported"
+    service.sam.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
     with pytest.raises(ModelCapabilityError) as exc:
         service.analyze(_image())
     assert exc.value.code == InferenceErrorCode.UNSUPPORTED_RUNTIME
@@ -223,4 +243,23 @@ def test_segformer_mapping_matches_present_training_metadata():
     assert adapter._configuration_error is None
     assert adapter.get_class_mapping() == {0: "background", 1: "diseased_region"}
     assert adapter.get_preprocessing_spec().target_size == (512, 512)
+
+
+def test_typed_stage_outputs_reject_invalid_scores_mappings_and_dimensions():
+    mask = np.ones((2, 3), dtype=bool)
+    candidate = LeafCandidate(mask, (0.0, 0.0, 1.0, 1.0), .8, 6, "sam-test")
+    assert candidate.mask.shape == (2, 3)
+    with pytest.raises(ValueError):
+        LeafFilterScore(float("nan"), False, "filter-test")
+    with pytest.raises(ValueError):
+        DiseasePrediction(38, "invalid", 1.0, tuple([1.0] + [0.0] * 37), "classifier-test")
+    with pytest.raises(ValueError):
+        SegmentationPrediction(np.full((2, 3), 2, dtype=np.uint8), {0: "background", 1: "diseased_region"}, "seg-test")
+
+
+def test_stage_output_carries_runtime_version_and_elapsed_time():
+    metadata = StageMetadata("sam2", "sam-test", "cpu", 17)
+    output = StageOutput(value=("candidate",), metadata=metadata)
+    assert output.metadata.runtime == "cpu"
+    assert output.metadata.duration_ms == 17
 

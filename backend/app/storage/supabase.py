@@ -57,6 +57,28 @@ class SupabaseStorageAdapter:
                 raise StorageConfigurationError("Could not initialize the Supabase Storage S3 client") from None
         self._client = s3_client
 
+    def check_ready(self) -> bool:
+        """Probe bucket access using a read-only S3 HEAD request."""
+        self._call("readiness", "head_bucket", Bucket=self._bucket_name)
+        return True
+    def create_download_url(self, object_key: str, *, expires_in: int = 300) -> str:
+        """Generate a short-lived HTTPS GET URL for this private object."""
+        if not isinstance(expires_in, int) or isinstance(expires_in, bool) or not 60 <= expires_in <= 900:
+            raise ValueError("Signed URL expiration must be between 60 and 900 seconds")
+        key = validate_object_key(object_key)
+        try:
+            url = self._client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self._bucket_name, "Key": self._provider_key(key)},
+                ExpiresIn=expires_in,
+                HttpMethod="GET",
+            )
+        except (BotoCoreError, ValueError):
+            raise StorageError("Could not create a temporary object download link") from None
+        endpoint = urlsplit(url) if isinstance(url, str) else None
+        if endpoint is None or endpoint.scheme != "https" or not endpoint.hostname:
+            raise StorageError("Storage provider returned an invalid temporary download link")
+        return url
     def put(
         self,
         content: bytes,

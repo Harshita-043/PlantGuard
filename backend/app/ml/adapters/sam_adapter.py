@@ -98,15 +98,18 @@ class Sam2LeafSegmentationAdapter(BaseModelAdapter):
         self.loading_status = ModelLoadingStatus.LOADING
         self.active_device = target_device
         self.last_error = None
+        self.load_error_code = None
 
         if not self.artifact_path.is_file():
             self.last_error = f"SAM2 checkpoint is missing: {self.artifact_path}"
+            self.load_error_code = InferenceErrorCode.MISSING_ARTIFACT
             self.loading_status = ModelLoadingStatus.FAILED
             logger.warning(self.last_error)
             return False
 
         if self.execution_strategy not in {"auto", "cpu_bounded", "cuda_dense"}:
             self.last_error = f"Unsupported SAM2 strategy: {self.execution_strategy}"
+            self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
             self.loading_status = ModelLoadingStatus.FAILED
             return False
 
@@ -118,12 +121,14 @@ class Sam2LeafSegmentationAdapter(BaseModelAdapter):
             config_rel = Path(self.config_name)
             if config_rel.is_absolute() or ".." in config_rel.parts:
                 self.last_error = "SAM2 config must be a package-relative config name"
+                self.load_error_code = InferenceErrorCode.INVALID_CONFIGURATION
                 self.loading_status = ModelLoadingStatus.FAILED
                 return False
             sam2_repo_root = Path(sam2.__file__).resolve().parent.parent
             config_path = sam2_repo_root / config_rel
             if not config_path.is_file():
                 self.last_error = f"SAM2 package config is missing: {self.config_name}"
+                self.load_error_code = InferenceErrorCode.INVALID_CONFIGURATION
                 self.loading_status = ModelLoadingStatus.FAILED
                 return False
 
@@ -154,11 +159,13 @@ class Sam2LeafSegmentationAdapter(BaseModelAdapter):
             return True
         except ImportError as e:
             self.last_error = f"SAM 2.1 package not installed in environment: {e}"
+            self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
             self.loading_status = ModelLoadingStatus.FAILED
             logger.warning(self.last_error)
             return False
         except Exception as exc:
             self.last_error = f"Failed to load SAM 2.1: {exc}"
+            self.load_error_code = InferenceErrorCode.MODEL_FAILURE
             self.loading_status = ModelLoadingStatus.FAILED
             logger.error(self.last_error)
             return False
