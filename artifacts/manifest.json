@@ -1,0 +1,174 @@
+[
+  {
+    "path": "C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\sam2\\sam2.1_hiera_base_plus.pt",
+    "error": "[ONNXRuntimeError] : 7 : INVALID_PROTOBUF : Load model from C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\sam2\\sam2.1_hiera_base_plus.pt failed:Protobuf parsing failed."
+  },
+  {
+    "path": "C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\mobilesam\\mobile_sam.pt",
+    "error": "[ONNXRuntimeError] : 7 : INVALID_PROTOBUF : Load model from C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\mobilesam\\mobile_sam.pt failed:Protobuf parsing failed."
+  },
+  {
+    "path": "C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\dino_leaf_filter\\dino_leaf_filter.pt",
+    "error": "[ONNXRuntimeError] : 7 : INVALID_PROTOBUF : Load model from C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\dino_leaf_filter\\dino_leaf_filter.pt failed:Protobuf parsing failed."
+  },
+  {
+    "path": "C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\dino_leaf_filter\\dino_leaf_filter_v2.pt",
+    "error": "[ONNXRuntimeError] : 7 : INVALID_PROTOBUF : Load model from C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\dino_leaf_filter\\dino_leaf_filter_v2.pt failed:Protobuf parsing failed."
+  },
+  {
+    "path": "C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\optimized\\dino_leaf_filter\\onnx\\dino_leaf_filter_fp32_224.onnx",
+    "sha256": "d8411259acd383527e07911dbf3c0896bb7091d7b0c9b666fe8efadaf83e16a7",
+    "precision": "fp32",
+    "inputs": [
+      {
+        "name": "pixel_values",
+        "shape": [1, 3, 224, 224],
+        "type": "tensor(float)"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "logits",
+        "shape": [1],
+        "type": "tensor(float)"
+      }
+    ],
+    "dummy": "ok"
+  },
+  {
+    "path": "C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\optimized\\dino_leaf_filter\\onnx_int8\\dino_leaf_filter_dynamic_int8.onnx",
+    "sha256": "1ca2733b04d3b477764552492a76b9d3d2d8717d1ac48d646ebddff41d6983ab",
+    "precision": "fp32",
+    "inputs": [
+      {
+        "name": "pixel_values",
+        "shape": [1, 3, 224, 224],
+        "type": "tensor(float)"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "logits",
+        "shape": [1],
+        "type": "tensor(float)"
+      }
+    ],
+    "dummy": "ok"
+  },
+  {
+    "path": "C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\optimized\\dino_disease\\onnx\\dino_disease_fp32_224.onnx",
+    "sha256": "edc3682191f994b7b3df76c23ce45ad4809399d8adf860cdd9afe6a5aff9b5b5",
+    "precision": "fp32",
+    "inputs": [
+      {
+        "name": "images",
+        "shape": ["batch_size", 3, 224, 224],
+        "type": "tensor(float)"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "logits",
+        "shape": ["batch_size", 38],
+        "type": "tensor(float)"
+      },
+      {
+        "name": "embeddings",
+        "shape": ["batch_size", 768],
+        "type": "tensor(float)"
+      }
+    ],
+    "dummy": "ok"
+  },
+  {
+    "path": "C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\optimized\\dino_disease\\onnx_int8\\dino_disease_dynamic_int8.onnx",
+    "sha256": "e19164b3ef630646f8b39d1e1fda87fe40203ba97acbbf9b939037548967bd2c",
+    "precision": "fp32",
+    "inputs": [
+      {
+        "name": "images",
+        "shape": ["batch_size", 3, 224, 224],
+        "type": "tensor(float)"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "logits",
+        "shape": ["batch_size", 38],
+        "type": "tensor(float)"
+      },
+      {
+        "name": "embeddings",
+        "shape": ["batch_size", 768],
+        "type": "tensor(float)"
+      }
+    ],
+    "dummy": "ok"
+  },
+  {
+    "path": "C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\optimized\\dino_disease\\onnx_selective_int8\\dino_disease_mlp_int8.onnx",
+    "sha256": "663c6f1628bc610d58aa98cebb79f829d4d2642bc433e5510159289375874118",
+    "precision": "fp32",
+    "inputs": [
+      {
+        "name": "images",
+        "shape": ["batch_size", 3, 224, 224],
+        "type": "tensor(float)"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "logits",
+        "shape": ["batch_size", 38],
+        "type": "tensor(float)"
+      },
+      {
+        "name": "embeddings",
+        "shape": ["batch_size", 768],
+        "type": "tensor(float)"
+      }
+    ],
+    "dummy": "ok"
+  },
+  {
+    "path": "C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\optimized\\segformer\\onnx\\segformer_fp32_512.onnx",
+    "sha256": "b47e1d4ea204b8248ca1585d2583aaa99a2d4ebf3ad30c78b7e7dde50c69554f",
+    "precision": "fp32",
+    "inputs": [
+      {
+        "name": "pixel_values",
+        "shape": [1, 3, 512, 512],
+        "type": "tensor(float)"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "logits",
+        "shape": [1, 2, 512, 512],
+        "type": "tensor(float)"
+      }
+    ],
+    "dummy": "ok"
+  },
+  {
+    "path": "C:\\Users\\Asus\\PLANTGUARD AI\\artifacts\\optimized\\segformer\\onnx_int8\\segformer_dynamic_int8.onnx",
+    "sha256": "12f253b2c85ef39c1bce153e607e9ddef9032329cc19c8a772df1043b2b146d8",
+    "precision": "fp32",
+    "inputs": [
+      {
+        "name": "pixel_values",
+        "shape": [1, 3, 512, 512],
+        "type": "tensor(float)"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "logits",
+        "shape": [1, 2, 512, 512],
+        "type": "tensor(float)"
+      }
+    ],
+    "dummy": "ok"
+  }
+]
+
