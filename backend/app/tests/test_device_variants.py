@@ -79,6 +79,9 @@ def test_variant_selection_requires_profile_compatibility_and_budget_measurement
     with pytest.raises(ModelCapabilityError) as exc:
         registry.select("dino_disease_classifier", profile="cpu", capabilities=_caps("blocked"))
     assert exc.value.code == InferenceErrorCode.UNSUPPORTED_RUNTIME
+    assert "requested runtime 'cpu'" in str(exc.value)
+    assert "available runtimes: none" in str(exc.value)
+    assert "original: requested profile 'cpu' is blocked" in str(exc.value)
 
     with pytest.raises(ModelCapabilityError):
         registry.select("dino_disease_classifier", profile="cpu", capabilities=_caps(), memory_limit_gb=2.0)
@@ -86,6 +89,38 @@ def test_variant_selection_requires_profile_compatibility_and_budget_measurement
     with pytest.raises(ModelCapabilityError) as concurrency_error:
         registry.select("dino_disease_classifier", profile="cpu", capabilities=_caps(), concurrency=2)
     assert concurrency_error.value.code == InferenceErrorCode.RESOURCE_LIMIT
+
+
+def test_unsupported_runtime_error_reports_versions_and_all_candidate_rejections():
+    registry = _registry(None, [
+        _variant("cpu-original"),
+        _variant("cuda-original", device_profiles=["cuda"]),
+    ])
+    capabilities = SimpleNamespace(
+        model_compatibility={
+            "dinov2_vitb14_classifier": {
+                "cpu": {"status": "blocked", "requirements": ["Python 3.12", "torch==2.6.0"]},
+                "cuda": {"status": "prerequisites_present"},
+            },
+        },
+        supported_python_version=False,
+        python_version="3.14.0",
+        packages={"torch": "2.14.1"},
+        package_version_compatibility={"torch": False},
+    )
+
+    with pytest.raises(ModelCapabilityError) as exc:
+        registry.select("dino_disease_classifier", profile="cpu", capabilities=capabilities)
+
+    message = str(exc.value)
+    assert exc.value.code == InferenceErrorCode.UNSUPPORTED_RUNTIME
+    assert "requested runtime 'cpu'" in message
+    assert "available runtimes: cuda" in message
+    assert "Python 3.12 required (found 3.14.0)" in message
+    assert "torch==2.6.0 required (found torch 2.14.1)" in message
+    assert "cpu-original:" in message
+    assert "cuda-original:" in message
+    assert "candidate profiles: cuda" in message
 
 
 def test_variant_registry_rejects_missing_sha256():
@@ -119,7 +154,7 @@ def test_manifest_registers_each_original_and_has_no_approved_optimized_variant(
     data = json.loads((root / "artifacts" / "model_manifest.json").read_text(encoding="utf-8"))
     assert set(data["models"]) == {
         "sam2_hiera_base_plus", "dinov2_vits14_leaf_filter",
-        "dinov2_vitb14_classifier", "segformer_b0_plantseg",
+        "dinov2_vitb14_classifier", "segformer_b0_plantseg", "mobile_sam_vit_t",
     }
     for model in data["models"].values():
         assert model["original_checkpoint"]["path"]

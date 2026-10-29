@@ -205,6 +205,11 @@ class FullScanResult(BaseModel):
         default_factory=dict,
         description="Mapping of active model component names to their artifact versions"
     )
+    sam_variant: str = Field(default="unknown", description="Leaf proposal model adapter used for this scan")
+    sam_fallback_applied: bool = Field(
+        default=False,
+        description="Whether MobileSAM was used after SAM 2 could not generate candidates",
+    )
     stage_timings_ms: Dict[str, int] = Field(default_factory=dict, description="Per-stage elapsed time in milliseconds")
     model_load_timings_ms: Dict[str, int] = Field(default_factory=dict, description="Lazy per-model checkpoint load time in milliseconds")
     leaves: List[SingleLeafAnalysis] = Field(default_factory=list, description="Individual leaf assessments")

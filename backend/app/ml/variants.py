@@ -13,6 +13,7 @@ from app.ml.errors import InferenceErrorCode, ModelCapabilityError
 
 MODEL_IDS = {
     "sam2_instance_segmentation": "sam2_hiera_base_plus",
+    "mobile_sam_instance_segmentation": "mobile_sam_vit_t",
     "dino_leaf_filter": "dinov2_vits14_leaf_filter",
     "dino_disease_classifier": "dinov2_vitb14_classifier",
     "segformer_disease_segmentation": "segformer_b0_plantseg",
@@ -54,16 +55,39 @@ class ModelVariantRegistry:
             raise ModelCapabilityError(InferenceErrorCode.MISSING_ARTIFACT,
                                        f"No variants registered for {model_id}", stage="variant_selection")
         profile = "cuda" if profile.startswith("cuda") else profile
-        compatibility = capabilities.model_compatibility.get(model_id, {}).get(profile, {}).get("status")
-        if compatibility != "prerequisites_present":
-            raise ModelCapabilityError(InferenceErrorCode.UNSUPPORTED_RUNTIME,
-                                       f"{model_id} is not runtime-compatible with profile '{profile}'", stage="variant_selection")
-
         if preference not in {"automatic", "original"}:
             raise ValueError("Variant preference must be automatic or original")
         variants = sorted(model.get("variants", []), key=lambda v: self._selection_order(v, preference))
+        compatibility_matrix = capabilities.model_compatibility.get(model_id, {})
+        compatibility_entry = compatibility_matrix.get(profile, {})
+        compatibility = compatibility_entry.get("status")
+        available_runtimes = sorted(
+            runtime for runtime, entry in compatibility_matrix.items()
+            if runtime in {"cpu", "cuda", "mps"} and isinstance(entry, dict)
+            and entry.get("status") == "prerequisites_present"
+        )
         reasons: list[str] = []
         resource_rejected = False
+        if compatibility != "prerequisites_present":
+            unmet_requirements = self._runtime_rejection_reasons(
+                model_id, compatibility_entry, capabilities
+            )
+            for variant in variants:
+                profiles = ", ".join(variant.get("device_profiles", [])) or "none"
+                reasons.append(
+                    f"{variant.get('variant_id')}: requested profile '{profile}' "
+                    f"is blocked; candidate profiles: {profiles}; unmet requirements: "
+                    f"{', '.join(unmet_requirements)}"
+                )
+            tried = "; ".join(reasons) or "no eligible variants are registered"
+            raise ModelCapabilityError(
+                InferenceErrorCode.UNSUPPORTED_RUNTIME,
+                f"No safe variant available for {model_id}: requested runtime '{profile}'; "
+                f"available runtimes: {', '.join(available_runtimes) or 'none'}; "
+                f"variants tried: {tried}",
+                stage="variant_selection",
+            )
+
         for variant in variants:
             optimized = variant.get("kind") != "original"
             if optimized:
@@ -113,7 +137,50 @@ class ModelVariantRegistry:
         reason = "; ".join(reasons) or "no eligible variants are registered"
         code = InferenceErrorCode.RESOURCE_LIMIT if resource_rejected else InferenceErrorCode.ARTIFACT_INTEGRITY
         raise ModelCapabilityError(code,
-                                   f"No safe variant available for {model_id}: {reason}", stage="variant_selection")
+                                   f"No safe variant available for {model_id}: requested runtime '{profile}'; "
+                                   f"available runtimes: {', '.join(available_runtimes) or 'none'}; "
+                                   f"variants tried: {reason}", stage="variant_selection")
+
+    @staticmethod
+    def _runtime_rejection_reasons(
+        model_id: str,
+        compatibility: dict[str, Any],
+        capabilities: Any,
+    ) -> list[str]:
+        requirements = compatibility.get("requirements", [])
+        failed: list[str] = []
+        if any(requirement.lower().startswith("python 3.12") for requirement in requirements):
+            if not getattr(capabilities, "supported_python_version", True):
+                failed.append(
+                    f"Python 3.12 required (found {getattr(capabilities, 'python_version', 'unknown')})"
+                )
+
+        package_versions = getattr(capabilities, "packages", {})
+        package_compatibility = getattr(capabilities, "package_version_compatibility", {})
+        package_names = ("torch", "torchvision", "transformers", "safetensors", "sam2", "mobile_sam", "timm")
+        for requirement in requirements:
+            package = next(
+                (name for name in package_names if requirement.lower().startswith(name)),
+                None,
+            )
+            if package == "torch" and requirement.lower() == "torch":
+                if not getattr(capabilities, "inference_backends", {}).get("torch", False):
+                    failed.append("PyTorch is not installed")
+            elif package and package_compatibility.get(package) is False:
+                found = package_versions.get(package) or "not installed"
+                failed.append(f"{requirement} required (found {package} {found})")
+
+        model_compatibility = getattr(capabilities, "model_compatibility", {}).get(model_id, {})
+        if (any("official_hiera_base_plus_config" in requirement for requirement in requirements)
+                and model_compatibility.get("config_present") is False):
+            failed.append("official Hiera Base Plus package config is unavailable")
+        if (any("available_nvidia_cuda_device" in requirement for requirement in requirements)
+                and getattr(capabilities, "cuda", {}).get("available") is not True):
+            failed.append("an available NVIDIA CUDA device is required")
+        if (any("available_mps_device" in requirement for requirement in requirements)
+                and getattr(capabilities, "mps", {}).get("available") is not True):
+            failed.append("an available MPS device is required")
+        return failed or [f"runtime compatibility status is '{compatibility.get('status', 'unknown')}'"]
 
     @staticmethod
     def _selection_order(variant: dict[str, Any], preference: str = "automatic") -> tuple[int, float, str]:

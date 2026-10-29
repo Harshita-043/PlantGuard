@@ -73,7 +73,7 @@ def test_models_endpoint_reports_versions_without_paths_or_credentials(monkeypat
     assert payload["profile"]
     assert payload["device"]
     assert payload["precision"] == "fp32"
-    assert len(payload["models"]) == 4
+    assert len(payload["models"]) == 5
     serialized = response.text.lower()
     for forbidden in ("artifact_path", "remote_inference_url", "access_key", "secret_access_key"):
         assert forbidden not in serialized

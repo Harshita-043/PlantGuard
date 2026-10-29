@@ -124,8 +124,8 @@ class Sam2LeafSegmentationAdapter(BaseModelAdapter):
                 self.load_error_code = InferenceErrorCode.INVALID_CONFIGURATION
                 self.loading_status = ModelLoadingStatus.FAILED
                 return False
-            sam2_repo_root = Path(sam2.__file__).resolve().parent.parent
-            config_path = sam2_repo_root / config_rel
+            sam2_package_root = Path(sam2.__file__).resolve().parent
+            config_path = sam2_package_root / config_rel
             if not config_path.is_file():
                 self.last_error = f"SAM2 package config is missing: {self.config_name}"
                 self.load_error_code = InferenceErrorCode.INVALID_CONFIGURATION
@@ -193,8 +193,8 @@ class Sam2LeafSegmentationAdapter(BaseModelAdapter):
             candidate["method"] = "sam2.1_automatic_mask_generator"
         return candidates
 
+    @staticmethod
     def _filter_and_rank_leaf_candidates(
-        self,
         raw_masks: List[Dict[str, Any]],
         image_shape: Tuple[int, int],
     ) -> List[Dict[str, Any]]:

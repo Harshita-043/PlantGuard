@@ -67,6 +67,8 @@ def lifecycle_client(monkeypatch, tmp_path):
                 status="completed",
                 hardware_device="cpu",
                 processing_time_ms=3,
+                sam_variant="mobilesam-vit-t-fp32",
+                sam_fallback_applied=True,
                 plant_summary=PlantHealthSummary(
                     overall_health_score=100,
                     health_status=OverallHealthStatus.HEALTHY,
@@ -147,6 +149,8 @@ def test_authenticated_scan_persists_private_object_and_completed_model_result(l
     assert payload["status"] == "completed"
     assert payload["result_available"] is True
     assert payload["result"]["analysis_id"] == payload["analysis_id"]
+    assert payload["result"]["sam_variant"] == "mobilesam-vit-t-fp32"
+    assert payload["result"]["sam_fallback_applied"] is True
     assert payload["failure"] is None
     assert payload["image_content_type"] == "image/png"
     assert payload["image_size_bytes"] == len(_png_bytes())
@@ -157,6 +161,8 @@ def test_authenticated_scan_persists_private_object_and_completed_model_result(l
         assert str(analysis.user_id) == user_id
         assert analysis.status == "completed"
         assert analysis.result_data["analysis_id"] == str(analysis.id)
+        assert analysis.result_data["sam_variant"] == "mobilesam-vit-t-fp32"
+        assert analysis.result_data["sam_fallback_applied"] is True
         assert analysis.image_object_key.startswith(f"users/{user_id}/analyses/")
         assert "unsafe-client-name" not in analysis.image_object_key
         stored = storage.get(analysis.image_object_key)
@@ -187,8 +193,7 @@ def test_inference_capability_failure_is_persisted_as_failed(lifecycle_client, m
         assert failed.status == "failed" and failed.result_data is None
         assert failed.failure_data["code"] == "missing_artifact"
         assert failed.failure_data["stage"] == "variant_selection"
-        assert failed.failure_data["message"] == "The configured model or runtime is unavailable"
-        assert "checkpoint unavailable" not in failed.failure_data["message"]
+        assert failed.failure_data["message"] == "checkpoint unavailable"
 
     retrieved = client.get(f"/api/v1/analysis/{failed_id}", headers={"Authorization": f"Bearer {token}"})
     assert retrieved.status_code == 200
@@ -196,6 +201,7 @@ def test_inference_capability_failure_is_persisted_as_failed(lifecycle_client, m
     assert retrieved.json()["result"] is None
     assert retrieved.json()["failure"]["code"] == "missing_artifact"
     assert retrieved.json()["failure"]["stage"] == "variant_selection"
+    assert retrieved.json()["failure"]["message"] == "checkpoint unavailable"
 
 
 def test_unexpected_inference_failure_persists_only_safe_details(lifecycle_client, monkeypatch):

@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     SUPABASE_STORAGE_SECRET_ACCESS_KEY: Optional[SecretStr] = None
     JWT_SECRET_KEY: Optional[SecretStr] = None
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, gt=0, le=1440)
-    PLANTGUARD_DEVICE: Literal["auto", "cpu", "cuda", "cuda:0"] = "auto"
+    PLANTGUARD_DEVICE: Literal["auto", "cpu", "cuda", "cuda:0", "mps"] = "auto"
     PLANTGUARD_INFERENCE_PROFILE: Literal["auto", "cpu", "cuda", "remote"] = "auto"
     PLANTGUARD_CPU_MEMORY_LIMIT_GB: Optional[float] = Field(default=None, gt=0)
     PLANTGUARD_CUDA_MEMORY_LIMIT_GB: Optional[float] = Field(default=None, gt=0)

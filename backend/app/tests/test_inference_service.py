@@ -99,7 +99,9 @@ def test_pipeline_order_contracts_and_timing():
     assert result.leaves[0].candidate_source == "test-sam"
     assert result.leaves[0].classification.primary_class == "Crop___class_3"
     assert result.leaves[0].segmentation.total_leaf_pixels > 0
-    assert set(result.stage_timings_ms) == {"sam2_candidate_generation", "leaf_filter", "classifier", "segmentation_and_severity"}
+    assert set(result.stage_timings_ms) == {"leaf_candidate_generation", "leaf_filter", "classifier", "segmentation_and_severity"}
+    assert result.sam_variant == "test-sam"
+    assert result.sam_fallback_applied is False
     assert result.leaves[0].explainability.method == "dinov2_gradient_weighted_final_layer_attention"
     assert result.leaves[0].prediction_uncertainty.calibration_status == "incomplete"
     assert result.plant_summary.recommendations == []
@@ -113,10 +115,11 @@ def test_multiple_leaf_candidates_are_analyzed():
 
 def test_no_sam_candidates_raises_typed_error_without_fabricating_leaf():
     service, events = _service(masks=0)
+    service.mobile_sam = FakeAdapter("mobile_sam", events, lambda *_a, **_k: [])
     with pytest.raises(NoLeafFoundError) as exc:
         service.analyze(_image())
     assert exc.value.code == InferenceErrorCode.NO_LEAF_FOUND
-    assert [name for op, name in events if op == "predict"] == ["sam"]
+    assert [name for op, name in events if op == "predict"] == ["sam", "mobile_sam"]
 
 
 def test_candidates_rejected_by_filter_raise_no_leaf():
@@ -159,21 +162,102 @@ def test_missing_model_artifact_is_a_capability_error():
     service, _ = _service(masks=1)
     service.sam.is_ready = lambda: False
     service.sam.artifact_path = Path("missing-sam-checkpoint.pt")
+    service.mobile_sam = FakeAdapter("mobile_sam", [], lambda *_a, **_k: [])
+    service.mobile_sam.is_ready = lambda: False
+    service.mobile_sam.artifact_path = Path("missing-mobile-sam-checkpoint.pt")
     with pytest.raises(ModelCapabilityError) as exc:
         service.analyze(_image())
-    assert exc.value.code == InferenceErrorCode.MISSING_ARTIFACT
+    assert exc.value.code == InferenceErrorCode.UNSUPPORTED_RUNTIME
+    assert "sam2:" in str(exc.value)
+    assert "mobilesam:" in str(exc.value)
 
 
-def test_model_loader_failure_is_typed_and_does_not_continue():
+def test_model_loader_failure_is_reported_when_fallback_also_fails():
     service, events = _service(masks=1)
     service.sam.is_ready = lambda: False
     service.sam.load = lambda _device: False
     service.sam.last_error = "CUDA runtime unsupported"
     service.sam.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
+    service.mobile_sam = FakeAdapter("mobile_sam", events, lambda *_a, **_k: [])
+    service.mobile_sam.is_ready = lambda: False
+    service.mobile_sam.load = lambda _device: False
+    service.mobile_sam.last_error = "PyTorch package unavailable"
+    service.mobile_sam.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
     with pytest.raises(ModelCapabilityError) as exc:
         service.analyze(_image())
     assert exc.value.code == InferenceErrorCode.UNSUPPORTED_RUNTIME
+    assert "sam2:" in str(exc.value)
+    assert "mobilesam:" in str(exc.value)
     assert [event for event in events if event[0] == "predict"] == []
+
+
+def test_sam2_unavailable_falls_back_to_mobilesam_and_marks_result(monkeypatch):
+    service, events = _service(masks=1)
+    mobile_items = [{
+        "segmentation": np.pad(np.ones((60, 35), dtype=bool), ((10, 10), (10, 55))),
+        "bbox": [0.125, 0.125, 0.875, 0.45],
+        "score": .9,
+        "method": "mobilesam.point_grid_predictor",
+    }]
+    service.mobile_sam = FakeAdapter("mobile_sam_instance_segmentation", events, lambda *_a, **_k: mobile_items)
+    original_with_model = service._with_model
+
+    def fail_sam2_then_run_fallback(adapter, stage, operation):
+        if adapter is service.sam:
+            raise ModelCapabilityError(
+                InferenceErrorCode.UNSUPPORTED_RUNTIME,
+                "SAM2 runtime is blocked",
+                stage="variant_selection",
+            )
+        return original_with_model(adapter, stage, operation)
+
+    monkeypatch.setattr(service, "_with_model", fail_sam2_then_run_fallback)
+    result = service.analyze(_image(), analysis_id="mobilesam-fallback-test")
+
+    assert result.status == "completed"
+    assert result.sam_variant == "test-mobile_sam_instance_segmentation"
+    assert result.sam_fallback_applied is True
+    assert result.model_versions["leaf_proposals"] == "test-mobile_sam_instance_segmentation"
+    assert result.warnings[0].code == "MODEL_FALLBACK_APPLIED"
+    assert [name for op, name in events if op == "predict"] == [
+        "mobile_sam_instance_segmentation", "leaf", "classifier", "segmenter",
+    ]
+
+
+def test_sam2_success_does_not_load_or_run_mobilesam():
+    service, events = _service(masks=1)
+    service.mobile_sam = FakeAdapter(
+        "mobile_sam_instance_segmentation",
+        events,
+        lambda *_a, **_k: pytest.fail("MobileSAM must not run when SAM2 succeeds"),
+    )
+
+    result = service.analyze(_image())
+
+    assert result.sam_variant == "test-sam"
+    assert result.sam_fallback_applied is False
+    assert [name for op, name in events if op == "predict"] == ["sam", "leaf", "classifier", "segmenter"]
+
+
+def test_both_proposal_models_unavailable_returns_actionable_variant_list():
+    service, _ = _service(masks=1)
+    service.mobile_sam = FakeAdapter("mobile_sam_instance_segmentation", [], lambda *_a, **_k: [])
+
+    def unavailable(adapter, stage, _operation):
+        raise ModelCapabilityError(
+            InferenceErrorCode.UNSUPPORTED_RUNTIME,
+            f"{stage} runtime requirement is unavailable",
+            stage="variant_selection",
+        )
+
+    service._with_model = unavailable
+    with pytest.raises(ModelCapabilityError) as exc:
+        service._sam_candidates(_image(), {})
+
+    assert exc.value.stage == "variant_selection"
+    assert "requested runtime 'cpu'" in str(exc.value)
+    assert "sam2: sam2 runtime requirement is unavailable" in str(exc.value)
+    assert "mobilesam: mobilesam runtime requirement is unavailable" in str(exc.value)
 
 
 def test_incompatible_segformer_config_fails_closed_without_model_import():
@@ -262,4 +346,3 @@ def test_stage_output_carries_runtime_version_and_elapsed_time():
     output = StageOutput(value=("candidate",), metadata=metadata)
     assert output.metadata.runtime == "cpu"
     assert output.metadata.duration_ms == 17
-

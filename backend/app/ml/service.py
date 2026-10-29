@@ -18,6 +18,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from app.ml.adapters.disease_classifier import DinoDiseaseClassifierAdapter
 from app.ml.adapters.disease_segmentation import SegFormerDiseaseSegmentationAdapter
 from app.ml.adapters.leaf_filter import DinoLeafFilterAdapter
+from app.ml.adapters.mobile_sam_adapter import MobileSamLeafSegmentationAdapter
 from app.ml.adapters.sam_adapter import Sam2LeafSegmentationAdapter
 from app.ml.contracts import (
     DiseasePrediction,
@@ -79,6 +80,7 @@ class PlantAnalysisService:
         self,
         *,
         sam=None,
+        mobile_sam=None,
         leaf_filter=None,
         classifier=None,
         segmenter=None,
@@ -89,6 +91,7 @@ class PlantAnalysisService:
         variant_preference: str = "automatic",
     ):
         self.sam = sam if sam is not None else Sam2LeafSegmentationAdapter()
+        self.mobile_sam = mobile_sam if mobile_sam is not None else MobileSamLeafSegmentationAdapter()
         self.leaf_filter = leaf_filter if leaf_filter is not None else DinoLeafFilterAdapter()
         self.classifier = classifier if classifier is not None else DinoDiseaseClassifierAdapter()
         self.segmenter = segmenter if segmenter is not None else SegFormerDiseaseSegmentationAdapter()
@@ -96,6 +99,7 @@ class PlantAnalysisService:
         model_registry.register_adapter("disease_classifier", self.classifier)
         model_registry.register_adapter("disease_segmentation", self.segmenter)
         model_registry.register_adapter("leaf_instance_segmentation", self.sam)
+        model_registry.register_adapter("mobile_sam_instance_segmentation", self.mobile_sam)
         self.storage = storage
         self.device = device or device_manager.active_device
         configured_profile = settings.PLANTGUARD_INFERENCE_PROFILE
@@ -123,7 +127,7 @@ class PlantAnalysisService:
         self._inference_slot = _GLOBAL_INFERENCE_SLOT
         self._variant_registry: ModelVariantRegistry | None = None
         self._runtime_capabilities: RuntimeCapabilities | None = None
-        if not (self.device == "cpu" or self.device.startswith("cuda")):
+        if not (self.device in {"cpu", "mps"} or self.device.startswith("cuda")):
             raise ModelCapabilityError(InferenceErrorCode.UNSUPPORTED_RUNTIME,
                                        f"Model adapters do not support runtime '{self.device}'", stage="runtime")
 
@@ -158,6 +162,14 @@ class PlantAnalysisService:
             candidates = candidate_output.value
             if not candidates:
                 raise NoLeafFoundError()
+            sam_fallback_applied = self._selected_sam_adapter is self.mobile_sam
+            if sam_fallback_applied:
+                warnings.append(PipelineWarning(
+                    code="MODEL_FALLBACK_APPLIED",
+                    message="SAM 2 was unavailable; MobileSAM generated the leaf candidates.",
+                    component="leaf_proposal",
+                    severity=WarningSeverity.WARNING,
+                ))
 
             # Candidate filtering. A candidate's segmentation is always the SAM mask.
             accepted: list[tuple[LeafCandidate, np.ndarray, LeafFilterScore]] = []
@@ -361,11 +373,13 @@ class PlantAnalysisService:
                 hardware_device=self.device,
                 processing_time_ms=self._elapsed(started),
                 model_versions={
-                    "sam2": self.sam.artifact_version,
+                    "leaf_proposals": candidate_output.metadata.model_version,
                     "dinov2_vits14": self.leaf_filter.artifact_version,
                     "dinov2_vitb14": self.classifier.artifact_version,
                     "segformer_b0_plantseg": self.segmenter.artifact_version,
                 },
+                sam_variant=self._selected_sam_adapter.artifact_version,
+                sam_fallback_applied=sam_fallback_applied,
                 stage_timings_ms=timings,
                 model_load_timings_ms=dict(self.model_load_timings_ms),
                 leaves=leaves,
@@ -387,45 +401,85 @@ class PlantAnalysisService:
 
     def _sam_candidates(self, image: np.ndarray, timings: dict[str, int]) -> StageOutput[tuple[LeafCandidate, ...]]:
         t0 = time.perf_counter()
-        raw_candidates: list[LeafCandidate] = []
-        def generate(adapter):
-            for item in adapter.predict(image)[:self.candidate_limit]:
-                mask = np.asarray(item.get("segmentation"))
-                if mask.shape != image.shape[:2] or mask.ndim != 2 or not np.isin(mask, [0, 1, False, True]).all():
-                    raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
-                                         "SAM2 returned a mask with invalid dimensions or values", stage="sam2")
-                bbox_values = item.get("bbox")
-                if not isinstance(bbox_values, (list, tuple)) or len(bbox_values) != 4:
-                    raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
-                                         "SAM2 candidate is missing a normalized bounding box", stage="sam2")
-                bbox = tuple(float(v) for v in bbox_values)
-                if not np.isfinite(bbox).all() or not (0 <= bbox[0] < bbox[2] <= 1 and 0 <= bbox[1] < bbox[3] <= 1):
-                    raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
-                                         "SAM2 candidate bounding box is invalid", stage="sam2")
-                score = float(item.get("score", 0.0))
-                if not math.isfinite(score) or score < 0 or score > 1:
-                    raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
-                                         "SAM2 candidate score is invalid", stage="sam2")
-                if not np.any(mask):
-                    continue
-                if item.get("method") != "sam2.1_automatic_mask_generator":
-                    raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
-                                         "Candidate was not produced by real SAM2 automatic mask generation", stage="sam2")
-                raw_candidates.append(LeafCandidate(mask=mask.astype(bool), bbox=bbox, sam_score=score,
-                    area_pixels=int(np.count_nonzero(mask)), model_variant=adapter.artifact_version))
-        self._with_model(self.sam, "sam2", generate)
-        timings["sam2_candidate_generation"] = self._elapsed(t0)
-        logger.info("inference_stage_complete stage=sam2 candidates=%d runtime=%s model=%s duration_ms=%d",
-                    len(raw_candidates), self.device, self.sam.artifact_version,
-                    timings["sam2_candidate_generation"])
-        return StageOutput(
-            value=tuple(raw_candidates),
-            metadata=StageMetadata(
-                stage="sam2_candidate_generation",
-                model_version=self.sam.artifact_version,
-                runtime=self.device,
-                duration_ms=timings["sam2_candidate_generation"],
-            ),
+        self._selected_sam_adapter = None
+        failures: list[str] = []
+        for adapter, stage in ((self.sam, "sam2"), (self.mobile_sam, "mobilesam")):
+            raw_candidates: list[LeafCandidate] = []
+            expected_method = (
+                "mobilesam.point_grid_predictor"
+                if adapter is self.mobile_sam
+                else "sam2.1_automatic_mask_generator"
+            )
+
+            def generate(model_adapter):
+                for item in model_adapter.predict(image)[:self.candidate_limit]:
+                    mask = np.asarray(item.get("segmentation"))
+                    if mask.shape != image.shape[:2] or mask.ndim != 2 or not np.isin(mask, [0, 1, False, True]).all():
+                        raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
+                                             f"{stage} returned a mask with invalid dimensions or values", stage=stage)
+                    bbox_values = item.get("bbox")
+                    if not isinstance(bbox_values, (list, tuple)) or len(bbox_values) != 4:
+                        raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
+                                             f"{stage} candidate is missing a normalized bounding box", stage=stage)
+                    bbox = tuple(float(v) for v in bbox_values)
+                    if not np.isfinite(bbox).all() or not (
+                        0 <= bbox[0] < bbox[2] <= 1 and 0 <= bbox[1] < bbox[3] <= 1
+                    ):
+                        raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
+                                             f"{stage} candidate bounding box is invalid", stage=stage)
+                    score = float(item.get("score", 0.0))
+                    if not math.isfinite(score) or score < 0 or score > 1:
+                        raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
+                                             f"{stage} candidate score is invalid", stage=stage)
+                    if not np.any(mask):
+                        continue
+                    if item.get("method") != expected_method:
+                        raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
+                                             f"Candidate was not produced by the configured {stage} model",
+                                             stage=stage)
+                    raw_candidates.append(LeafCandidate(
+                        mask=mask.astype(bool),
+                        bbox=bbox,
+                        sam_score=score,
+                        area_pixels=int(np.count_nonzero(mask)),
+                        model_variant=model_adapter.artifact_version,
+                    ))
+
+            try:
+                self._with_model(adapter, stage, generate)
+            except ModelCapabilityError as exc:
+                detail = str(exc).replace(str(adapter.artifact_path), "checkpoint")
+                failures.append(f"{stage}: {detail}")
+                continue
+            if not raw_candidates:
+                failures.append(f"{stage}: model returned no usable candidates")
+                continue
+
+            self._selected_sam_adapter = adapter
+            elapsed = self._elapsed(t0)
+            timings["leaf_candidate_generation"] = elapsed
+            if adapter is self.mobile_sam:
+                logger.warning("model_fallback_applied primary=sam2 selected=mobilesam reason=%s",
+                               failures[0] if failures else "SAM 2 unavailable")
+            logger.info("inference_stage_complete stage=leaf_candidate_generation candidates=%d runtime=%s model=%s duration_ms=%d",
+                        len(raw_candidates), self.device, adapter.artifact_version, elapsed)
+            return StageOutput(
+                value=tuple(raw_candidates),
+                metadata=StageMetadata(
+                    stage="leaf_candidate_generation",
+                    model_version=adapter.artifact_version,
+                    runtime=self.device,
+                    duration_ms=elapsed,
+                ),
+            )
+
+        if all("model returned no usable candidates" in failure for failure in failures):
+            raise NoLeafFoundError(f"No leaf candidates were produced; variants tried: {'; '.join(failures)}")
+        raise ModelCapabilityError(
+            InferenceErrorCode.UNSUPPORTED_RUNTIME,
+            f"No leaf-proposal variant could run for requested runtime '{self.profile}' "
+            f"(device '{self.device}'); variants tried: {'; '.join(failures)}",
+            stage="variant_selection",
         )
 
     def _with_model(self, adapter, stage: str, operation: Callable) -> None:

@@ -4,10 +4,12 @@ from .leaf_filter import DinoLeafFilterAdapter
 from .disease_classifier import DinoDiseaseClassifierAdapter
 from .disease_segmentation import SegFormerDiseaseSegmentationAdapter
 from .sam_adapter import Sam2LeafSegmentationAdapter
+from .mobile_sam_adapter import MobileSamLeafSegmentationAdapter
 
 __all__ = [
     "DinoLeafFilterAdapter",
     "DinoDiseaseClassifierAdapter",
     "SegFormerDiseaseSegmentationAdapter",
     "Sam2LeafSegmentationAdapter",
+    "MobileSamLeafSegmentationAdapter",
 ]

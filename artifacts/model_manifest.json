@@ -181,7 +181,7 @@
           "rollback_target": null,
           "runtime_requirements": [
             "compatible PyTorch build",
-            "SAM2 v1.1.0 package",
+            "SAM-2==1.0 package",
             "official Hiera Base Plus package config"
           ],
           "sha256": "a2345aede8715ab1d5d31b4a509fb160c5a4af1970f199d9054ccfb746c004c5",
@@ -194,6 +194,71 @@
             "status": "not_evaluated"
           },
           "variant_id": "original-pytorch-fp32"
+        }
+      ]
+    },
+    "mobile_sam_vit_t": {
+      "architecture": "MobileSAM ViT-T",
+      "display_name": "MobileSAM ViT-T leaf proposal fallback",
+      "label_mapping_identity": {
+        "description": "Instance masks; no semantic class mapping."
+      },
+      "original_checkpoint": {
+        "path": "artifacts/mobilesam/mobile_sam.pt",
+        "sha256": "6dbb90523a35330fedd7f1d3dfc66f995213d81b29a5ca8108dbcdd4e37d6c2f",
+        "sha256_status": "verified_by_streaming_sha256"
+      },
+      "preprocessing_identity": {
+        "description": "Official MobileSAM predictor resize and normalization with an 8x8 positive point grid.",
+        "implementation": "backend/app/ml/adapters/mobile_sam_adapter.py"
+      },
+      "source_checkpoint_identity": "Official MobileSAM ViT-T checkpoint; SHA-256 verified against the repository file.",
+      "variants": [
+        {
+          "backend": "pytorch-mobile-sam",
+          "benchmark": {
+            "compatibility_results": {
+              "cpu": "not_measured",
+              "cuda": "not_measured",
+              "mps": "not_measured"
+            },
+            "latency_ms": null,
+            "model_load_ms": null,
+            "ram_peak_gb": null,
+            "status": "not_measured",
+            "vram_peak_gb": null
+          },
+          "created": {
+            "date": null,
+            "tool": "official MobileSAM checkpoint",
+            "version": null
+          },
+          "device_profiles": [
+            "cpu",
+            "cuda",
+            "mps"
+          ],
+          "kind": "original",
+          "label_mapping_identity": "same_as_model",
+          "path": "artifacts/mobilesam/mobile_sam.pt",
+          "precision": "fp32",
+          "preprocessing_identity": "same_as_model",
+          "quantization_method": "none",
+          "rollback_target": null,
+          "runtime_requirements": [
+            "torch",
+            "mobile_sam==1.0"
+          ],
+          "sha256": "6dbb90523a35330fedd7f1d3dfc66f995213d81b29a5ca8108dbcdd4e37d6c2f",
+          "sha256_status": "verified_by_streaming_sha256",
+          "source_checkpoint_identity": "same_as_model",
+          "validation": {
+            "dataset": null,
+            "quality_metrics": null,
+            "split": null,
+            "status": "not_evaluated"
+          },
+          "variant_id": "mobilesam-vit-t-fp32"
         }
       ]
     },

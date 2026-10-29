@@ -35,6 +35,15 @@ class DeviceManager:
             # Preserve explicit intent. Capability checks report an unusable CUDA
             # runtime instead of silently turning this into CPU inference.
             return "cuda:0"
+        if preferred == "mps":
+            try:
+                import torch
+                if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    return "mps"
+            except (ImportError, OSError, RuntimeError):
+                pass
+            logger.warning("MPS was requested but is unavailable; using CPU")
+            return "cpu"
         if preferred in ("directml", "openvino"):
             raise ValueError(f"Runtime '{preferred}' has no configured PlantGuard model adapter")
         if preferred != "auto":
@@ -51,6 +60,14 @@ class DeviceManager:
             pass
         except Exception as exc:
             logger.warning("CUDA probe encountered error, falling back to CPU: %s", exc)
+
+        try:
+            import torch
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                logger.info("Apple MPS device detected")
+                return "mps"
+        except (ImportError, OSError, RuntimeError) as exc:
+            logger.warning("MPS probe encountered error, falling back to CPU: %s", type(exc).__name__)
 
         logger.info("Using CPU execution mode; integrated graphics are not treated as CUDA")
         return "cpu"

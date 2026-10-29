@@ -134,7 +134,9 @@ async def analyze_image(
     except InferenceError as exc:
         db.rollback()
         public_message = (
-            "The configured model or runtime is unavailable"
+            str(exc)
+            if exc.stage == "variant_selection"
+            else "The configured model or runtime is unavailable"
             if exc.code in {
                 "missing_artifact", "unsupported_runtime", "artifact_integrity", "resource_limit"
             }

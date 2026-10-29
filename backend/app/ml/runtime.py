@@ -17,6 +17,8 @@ _DISTRIBUTIONS = {
     "transformers": "transformers",
     "safetensors": "safetensors",
     "sam2": "SAM-2",
+    "mobile_sam": "mobile-sam",
+    "timm": "timm",
     "onnxruntime": "onnxruntime",
     "openvino": "openvino",
     "directml": "torch-directml",
@@ -52,6 +54,14 @@ def _safetensors_supported(value: str | None) -> bool:
         return False
 
 
+def _mps_available() -> bool:
+    try:
+        import torch
+        return bool(hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+    except (ImportError, OSError, RuntimeError):
+        return False
+
+
 @dataclass(frozen=True)
 class RuntimeCapabilities:
     profile: str
@@ -67,6 +77,7 @@ class RuntimeCapabilities:
     package_version_compatibility: dict[str, bool]
     inference_backends: dict[str, bool]
     cuda: dict[str, Any]
+    mps: dict[str, bool]
     model_compatibility: dict[str, dict[str, Any]]
     configured_memory_limit_gb: float | None
     configured_concurrency: int
@@ -103,7 +114,9 @@ def collect_runtime_capabilities(
         "torchvision": _base_version(package_versions["torchvision"]) == "0.21.0",
         "transformers": _base_version(package_versions["transformers"]) == "4.57.6",
         "safetensors": _safetensors_supported(package_versions["safetensors"]),
-        "sam2": _base_version(package_versions["sam2"]) == "1.1.0",
+        "sam2": _base_version(package_versions["sam2"]) == "1.0",
+        "mobile_sam": _base_version(package_versions["mobile_sam"]) == "1.0",
+        "timm": _base_version(package_versions["timm"]) == "1.0.30",
     }
     cuda: dict[str, Any] = {
         "available": None if not installed["torch"] else False,
@@ -145,15 +158,34 @@ def collect_runtime_capabilities(
         sam_config_present = (package_root / "configs" / "sam2.1" / "sam2.1_hiera_b+.yaml").is_file()
 
     cuda_available = cuda["available"] is True
+    mps_available = _mps_available()
+    mps = {"available": mps_available}
     model_compatibility = {
         "sam2_hiera_base_plus": {
             "cpu": {"status": "prerequisites_present" if python_supported and installed["torch"] and installed["sam2"] and sam_config_present and version_checks["torch"] and version_checks["sam2"] else "blocked",
                     "runtime_validation": "not_smoke_tested",
-                    "requirements": ["torch==2.6.0", "sam2==1.1.0", "official_hiera_base_plus_config"]},
+                    "requirements": ["Python 3.12", "torch==2.6.0", "sam2==1.0", "official_hiera_base_plus_config"]},
             "cuda": {"status": "prerequisites_present" if python_supported and installed["torch"] and installed["sam2"] and sam_config_present and cuda_available and version_checks["torch"] and version_checks["sam2"] else "blocked",
                      "runtime_validation": "not_smoke_tested",
-                     "requirements": ["torch==2.6.0 CUDA build", "available_nvidia_cuda_device", "sam2==1.1.0", "official_hiera_base_plus_config"]},
+                     "requirements": ["Python 3.12", "torch==2.6.0 CUDA build", "available_nvidia_cuda_device", "sam2==1.0", "official_hiera_base_plus_config"]},
             "config_present": sam_config_present,
+        },
+        "mobile_sam_vit_t": {
+            "cpu": {
+                "status": "prerequisites_present" if installed["torch"] and installed["mobile_sam"] and installed["timm"] and version_checks["mobile_sam"] and version_checks["timm"] else "blocked",
+                "runtime_validation": "not_smoke_tested",
+                "requirements": ["torch", "mobile_sam==1.0", "timm==1.0.30"],
+            },
+            "cuda": {
+                "status": "prerequisites_present" if installed["torch"] and installed["mobile_sam"] and installed["timm"] and version_checks["mobile_sam"] and version_checks["timm"] and cuda_available else "blocked",
+                "runtime_validation": "not_smoke_tested",
+                "requirements": ["torch", "mobile_sam==1.0", "timm==1.0.30", "available_nvidia_cuda_device"],
+            },
+            "mps": {
+                "status": "prerequisites_present" if installed["torch"] and installed["mobile_sam"] and installed["timm"] and version_checks["mobile_sam"] and version_checks["timm"] and mps_available else "blocked",
+                "runtime_validation": "not_smoke_tested",
+                "requirements": ["torch", "mobile_sam==1.0", "timm==1.0.30", "available_mps_device"],
+            },
         },
         "dinov2_vits14_leaf_filter": {
             "cpu": {"status": "prerequisites_present" if python_supported and installed["torch"] and version_checks["torch"] else "blocked", "runtime_validation": "not_smoke_tested", "requirements": ["Python 3.12", "torch==2.6.0"]},
@@ -166,10 +198,10 @@ def collect_runtime_capabilities(
         "segformer_b0_plantseg": {
             "cpu": {"status": "prerequisites_present" if python_supported and installed["torch"] and installed["transformers"] and installed["safetensors"] and version_checks["torch"] and version_checks["transformers"] and version_checks["safetensors"] else "blocked",
                     "runtime_validation": "not_smoke_tested",
-                    "requirements": ["torch==2.6.0", "transformers==4.57.6", "safetensors>=0.5,<1"]},
+                    "requirements": ["Python 3.12", "torch==2.6.0", "transformers==4.57.6", "safetensors>=0.5,<1"]},
             "cuda": {"status": "prerequisites_present" if python_supported and installed["torch"] and installed["transformers"] and installed["safetensors"] and cuda_available and version_checks["torch"] and version_checks["transformers"] and version_checks["safetensors"] else "blocked",
                      "runtime_validation": "not_smoke_tested",
-                     "requirements": ["torch==2.6.0 CUDA build", "available_nvidia_cuda_device", "transformers==4.57.6", "safetensors>=0.5,<1"]},
+                     "requirements": ["Python 3.12", "torch==2.6.0 CUDA build", "available_nvidia_cuda_device", "transformers==4.57.6", "safetensors>=0.5,<1"]},
         },
     }
     cpu_model = platform.processor() or None
@@ -190,6 +222,7 @@ def collect_runtime_capabilities(
         package_version_compatibility=version_checks,
         inference_backends={name: installed[name] for name in ("torch", "onnxruntime", "openvino", "directml")},
         cuda=cuda,
+        mps=mps,
         model_compatibility=model_compatibility,
         configured_memory_limit_gb=memory_limit_gb,
         configured_concurrency=concurrency,
