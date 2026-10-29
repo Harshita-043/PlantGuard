@@ -7,15 +7,26 @@ export default function Index() {
       <span className="grid size-16 place-items-center rounded-2xl bg-[hsl(var(--sage))] text-primary">
         <Sprout size={30} />
       </span>
-      <h2 className="mt-5 text-2xl font-semibold tracking-[-0.04em]">PlantGuard AI</h2>
+      <h2 className="mt-5 text-2xl font-semibold tracking-[-0.04em]">
+        PlantGuard AI
+      </h2>
       <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
-        Upload and review account-owned plant scan records. Inference results appear when the configured model artifacts and runtime are available.
+        Upload and review account-owned plant scan records. Inference results
+        appear when the configured model artifacts and runtime are available.
       </p>
       <div className="mt-6 flex flex-wrap justify-center gap-3">
-        <Link to="/scan" className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground">
+        <Link
+          to="/scan"
+          className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
+        >
           <ScanLine size={16} /> Try image upload
         </Link>
-        <Link to="/plants" className="rounded-xl border border-border px-4 py-2.5 text-sm font-semibold">Plant records</Link>
+        <Link
+          to="/plants"
+          className="rounded-xl border border-border px-4 py-2.5 text-sm font-semibold"
+        >
+          Plant records
+        </Link>
       </div>
     </section>
   );

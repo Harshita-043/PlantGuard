@@ -25,13 +25,13 @@ class HealthStatus(str, Enum):
 class LeafResult(BaseModel):
     """Result for a single leaf analysis"""
     leaf_index: int = Field(..., description="Index of the leaf in the analysis")
-    bounding_box: List[float] = Field(..., min_items=4, max_items=4, description="[x_min, y_min, width, height] normalized 0-1")
+    bounding_box: List[float] = Field(..., min_length=4, max_length=4, description="[x_min, y_min, width, height] normalized 0-1")
     disease_class: str = Field(..., description="Disease classification (e.g., 'healthy', 'leaf_spot')")
     classification_confidence: float = Field(..., ge=0, le=1, description="Confidence in disease classification")
     all_probabilities: Optional[Dict[str, float]] = Field(None, description="Probabilities for all disease classes")
     disease_mask: Optional[List[List[bool]]] = Field(None, description="Binary mask of diseased regions (True=diseased)")
     diseased_area_ratio: float = Field(..., ge=0, le=1, description="Ratio of diseased pixels to total leaf area")
-    disease_bounding_box: List[float] = Field(..., min_items=4, max_items=4, description="[x_min, y_min, width, height] of diseased region normalized")
+    disease_bounding_box: List[float] = Field(..., min_length=4, max_length=4, description="[x_min, y_min, width, height] of diseased region normalized")
     severity_status: str = Field(default="available", description="available or unavailable")
     severity_score: Optional[float] = Field(None, ge=0, le=1, description="Mask-derived severity fraction when available")
     severity_level: Optional[SeverityLevel] = Field(None, description="Provisional category when available")

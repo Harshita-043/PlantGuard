@@ -24,7 +24,8 @@ async function readError(response: Response): Promise<AuthApiError> {
     if (typeof body === "object" && body !== null && "detail" in body) {
       const detail = body.detail;
       if (typeof detail === "string") message = detail;
-      else if (Array.isArray(detail)) message = "Please check the submitted information.";
+      else if (Array.isArray(detail))
+        message = "Please check the submitted information.";
     }
   } catch {
     // Keep a safe status-based message if the server did not return JSON.

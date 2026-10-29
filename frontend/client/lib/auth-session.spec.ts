@@ -20,7 +20,10 @@ function createStorage(): SessionStorageLike {
 describe("auth session storage", () => {
   it("writes, reads, and clears the token session", () => {
     const storage = createStorage();
-    const session = { accessToken: "signed-token", expiresAt: 1_800_000_000_000 };
+    const session = {
+      accessToken: "signed-token",
+      expiresAt: 1_800_000_000_000,
+    };
 
     writeAuthSession(storage, session);
 
@@ -31,7 +34,10 @@ describe("auth session storage", () => {
 
   it("discards malformed saved session data", () => {
     const storage = createStorage();
-    storage.setItem(AUTH_SESSION_KEY, JSON.stringify({ accessToken: "", expiresAt: "later" }));
+    storage.setItem(
+      AUTH_SESSION_KEY,
+      JSON.stringify({ accessToken: "", expiresAt: "later" }),
+    );
 
     expect(readAuthSession(storage)).toBeNull();
     expect(storage.getItem(AUTH_SESSION_KEY)).toBeNull();

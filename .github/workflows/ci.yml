@@ -55,6 +55,11 @@ jobs:
           cd frontend
           npm run typecheck
 
+      - name: Run frontend unit tests
+        run: |
+          cd frontend
+          npm test
+
       - name: Build frontend
         run: |
           cd frontend

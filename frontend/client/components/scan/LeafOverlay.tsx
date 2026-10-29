@@ -28,18 +28,19 @@ export default function LeafOverlay({
 
   const leafElements = leafResults.map((leaf, index) => {
     // Convert normalized bounding box to pixel values
-    const left = (leaf.bounding_box[0] * imageWidth) + "px";
-    const top = (leaf.bounding_box[1] * imageHeight) + "px";
-    const width = (leaf.bounding_box[2] * imageWidth) + "px";
-    const height = (leaf.bounding_box[3] * imageHeight) + "px";
+    const left = leaf.bounding_box[0] * imageWidth + "px";
+    const top = leaf.bounding_box[1] * imageHeight + "px";
+    const width = leaf.bounding_box[2] * imageWidth + "px";
+    const height = leaf.bounding_box[3] * imageHeight + "px";
 
     // Determine leaf color based on disease status
     const isHealthy = leaf.disease_class === "healthy";
     const leafColor = isHealthy
       ? "hsl(var(--success))"
-      : leaf.disease_class.includes("spot") || leaf.disease_class.includes("mildew")
-      ? "hsl(var(--warning))"
-      : "hsl(var(--destructive))";
+      : leaf.disease_class.includes("spot") ||
+          leaf.disease_class.includes("mildew")
+        ? "hsl(var(--warning))"
+        : "hsl(var(--destructive))";
 
     return (
       <div
@@ -49,14 +50,20 @@ export default function LeafOverlay({
       >
         {/* Leaf bounding box */}
         <div className="absolute inset-0">
-          <div className="border-2 border-dashed" style={{ borderColor: leafColor }} />
+          <div
+            className="border-2 border-dashed"
+            style={{ borderColor: leafColor }}
+          />
         </div>
 
         {/* Leaf number */}
         <div className="absolute left-2 top-2">
-          <div className="flex items-center justify-center w-6 h-6 rounded-full" style={{
-            backgroundColor: leafColor,
-          }}>
+          <div
+            className="flex items-center justify-center w-6 h-6 rounded-full"
+            style={{
+              backgroundColor: leafColor,
+            }}
+          >
             <span className="text-xs font-medium text-white">{index + 1}</span>
           </div>
         </div>
@@ -67,10 +74,13 @@ export default function LeafOverlay({
             {/* In a real implementation, we would render the disease mask as a semi-transparent overlay */}
             {/* For now, we'll show a simple indicator */}
             {leaf.diseased_area_ratio > 0.1 && (
-              <div className="absolute inset-0" style={{
-                backgroundColor: "hsl(var(--warning))",
-                opacity: leaf.diseased_area_ratio * 0.3,
-              }} />
+              <div
+                className="absolute inset-0"
+                style={{
+                  backgroundColor: "hsl(var(--warning))",
+                  opacity: leaf.diseased_area_ratio * 0.3,
+                }}
+              />
             )}
           </div>
         )}
@@ -80,10 +90,13 @@ export default function LeafOverlay({
           <div className="absolute inset-0" style={{ pointerEvents: "none" }}>
             {/* In a real implementation, we would render the heatmap as a colored overlay */}
             {/* For now, we'll show a simple indicator */}
-            <div className="absolute inset-0" style={{
-              backgroundColor: "hsl(var(--ai-accent))",
-              opacity: 0.2,
-            }} />
+            <div
+              className="absolute inset-0"
+              style={{
+                backgroundColor: "hsl(var(--ai-accent))",
+                opacity: 0.2,
+              }}
+            />
           </div>
         )}
       </div>
@@ -98,19 +111,40 @@ export default function LeafOverlay({
         className="w-full h-full object-cover rounded-xl"
         onLoad={handleImageLoad}
       />
-      {!imageLoaded ? <div className="absolute inset-0 flex items-center justify-center bg-muted/70"><Loader size={24} className="mr-2 animate-spin" /><p className="text-muted-foreground">Loading plant image...</p></div> : imageWidth > 0 && imageHeight > 0 && <div className="absolute inset-0 pointer-events-none">{leafElements}</div>}
+      {!imageLoaded ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-muted/70">
+          <Loader size={24} className="mr-2 animate-spin" />
+          <p className="text-muted-foreground">Loading plant image...</p>
+        </div>
+      ) : (
+        imageWidth > 0 &&
+        imageHeight > 0 && (
+          <div className="absolute inset-0 pointer-events-none">
+            {leafElements}
+          </div>
+        )
+      )}
       <div className="absolute bottom-4 left-4 space-x-2">
         {/* Legend */}
         <div className="flex items-center gap-2 text-xs">
-          <div className="w-3 h-3 rounded border border-dashed" style={{ borderColor: "hsl(var(--success))" }} />
+          <div
+            className="w-3 h-3 rounded border border-dashed"
+            style={{ borderColor: "hsl(var(--success))" }}
+          />
           <span>Healthy</span>
         </div>
         <div className="flex items-center gap-2 text-xs">
-          <div className="w-3 h-3 rounded border border-dashed" style={{ borderColor: "hsl(var(--warning))" }} />
+          <div
+            className="w-3 h-3 rounded border border-dashed"
+            style={{ borderColor: "hsl(var(--warning))" }}
+          />
           <span>Warning</span>
         </div>
         <div className="flex items-center gap-2 text-xs">
-          <div className="w-3 h-3 rounded border border-dashed" style={{ borderColor: "hsl(var(--destructive))" }} />
+          <div
+            className="w-3 h-3 rounded border border-dashed"
+            style={{ borderColor: "hsl(var(--destructive))" }}
+          />
           <span>Issue</span>
         </div>
       </div>

@@ -1,5 +1,7 @@
 {
-  "name": "fusion-starter",
+  "name": "plantguard-frontend",
+  "version": "1.0.0",
+  "description": "PlantGuard AI frontend dashboard and disease diagnostics interface",
   "private": true,
   "type": "module",
   "scripts": {

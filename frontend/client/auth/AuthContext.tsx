@@ -1,4 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 
 import type { AuthUserResponse } from "@shared/api";
@@ -50,7 +57,9 @@ function isUnauthorized(error: unknown): boolean {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Authentication request failed. Please try again.";
+  return error instanceof Error
+    ? error.message
+    : "Authentication request failed. Please try again.";
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -67,7 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         status: "unavailable",
         user: null,
         session: null,
-        error: "Browser session storage is unavailable. Sign-in cannot be persisted in this tab.",
+        error:
+          "Browser session storage is unavailable. Sign-in cannot be persisted in this tab.",
         sessionExpired: false,
       });
       return;
@@ -90,7 +100,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const user = await authApi.currentUser(session.accessToken);
-      setState({ status: "authenticated", user, session, error: null, sessionExpired: false });
+      setState({
+        status: "authenticated",
+        user,
+        session,
+        error: null,
+        sessionExpired: false,
+      });
     } catch (error) {
       if (isUnauthorized(error)) {
         try {
@@ -98,7 +114,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           // The backend rejected the token; do not restore the identity in memory.
         }
-        setState({ ...initialState, status: "anonymous", sessionExpired: true });
+        setState({
+          ...initialState,
+          status: "anonymous",
+          sessionExpired: true,
+        });
         return;
       }
 
@@ -119,34 +139,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (state.status !== "authenticated" || !state.session) return;
 
-    const timeout = window.setTimeout(() => {
-      try {
-        clearAuthSession(storage());
-      } catch {
-        // Expiration still clears the in-memory identity.
-      }
-      setState({ ...initialState, status: "anonymous", sessionExpired: true });
-    }, Math.max(0, state.session.expiresAt - Date.now()));
+    const timeout = window.setTimeout(
+      () => {
+        try {
+          clearAuthSession(storage());
+        } catch {
+          // Expiration still clears the in-memory identity.
+        }
+        setState({
+          ...initialState,
+          status: "anonymous",
+          sessionExpired: true,
+        });
+      },
+      Math.max(0, state.session.expiresAt - Date.now()),
+    );
 
     return () => window.clearTimeout(timeout);
   }, [state.status, state.session]);
 
   const login = useCallback(async (email: string, password: string) => {
     const token = await authApi.login({ email, password });
-    if (token.token_type !== "bearer" || !token.access_token || token.expires_in <= 0) {
-      throw new Error("The authentication service returned an invalid session.");
+    if (
+      token.token_type !== "bearer" ||
+      !token.access_token ||
+      token.expires_in <= 0
+    ) {
+      throw new Error(
+        "The authentication service returned an invalid session.",
+      );
     }
 
-    const session = { accessToken: token.access_token, expiresAt: Date.now() + token.expires_in * 1000 };
+    const session = {
+      accessToken: token.access_token,
+      expiresAt: Date.now() + token.expires_in * 1000,
+    };
     try {
       writeAuthSession(storage(), session);
     } catch {
-      throw new Error("Could not save the sign-in in this tab. Check browser storage settings and try again.");
+      throw new Error(
+        "Could not save the sign-in in this tab. Check browser storage settings and try again.",
+      );
     }
 
     try {
       const user = await authApi.currentUser(session.accessToken);
-      setState({ status: "authenticated", user, session, error: null, sessionExpired: false });
+      setState({
+        status: "authenticated",
+        user,
+        session,
+        error: null,
+        sessionExpired: false,
+      });
     } catch (error) {
       if (isUnauthorized(error)) {
         try {
@@ -154,7 +198,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           // The rejected token will not be accepted by the API.
         }
-        setState({ ...initialState, status: "anonymous", sessionExpired: true });
+        setState({
+          ...initialState,
+          status: "anonymous",
+          sessionExpired: true,
+        });
       } else {
         setState({
           status: "unavailable",
@@ -178,7 +226,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       clearAuthSession(storage());
     } catch {
-      error = "This tab could not clear its saved session. Close the tab to discard it.";
+      error =
+        "This tab could not clear its saved session. Close the tab to discard it.";
     }
     setState({ ...initialState, status: "anonymous", error });
   }, []);
@@ -187,7 +236,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       status: state.status,
       user: state.user,
-      accessToken: state.status === "authenticated" ? state.session?.accessToken ?? null : null,
+      accessToken:
+        state.status === "authenticated"
+          ? (state.session?.accessToken ?? null)
+          : null,
       error: state.error,
       sessionExpired: state.sessionExpired,
       login,

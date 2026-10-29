@@ -5,9 +5,14 @@ export interface AuthSession {
   expiresAt: number;
 }
 
-export type SessionStorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+export type SessionStorageLike = Pick<
+  Storage,
+  "getItem" | "setItem" | "removeItem"
+>;
 
-export function readAuthSession(storage: SessionStorageLike): AuthSession | null {
+export function readAuthSession(
+  storage: SessionStorageLike,
+): AuthSession | null {
   const serialized = storage.getItem(AUTH_SESSION_KEY);
   if (!serialized) return null;
 
@@ -33,7 +38,10 @@ export function readAuthSession(storage: SessionStorageLike): AuthSession | null
   return null;
 }
 
-export function writeAuthSession(storage: SessionStorageLike, session: AuthSession): void {
+export function writeAuthSession(
+  storage: SessionStorageLike,
+  session: AuthSession,
+): void {
   storage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
 }
 

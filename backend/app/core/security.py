@@ -51,10 +51,13 @@ def perform_dummy_password_verification(password: str) -> None:
 
 
 def get_jwt_signing_key(configuration: Settings = settings) -> str:
-    configured_key: SecretStr | None = configuration.JWT_SECRET_KEY
+    configured_key = configuration.JWT_SECRET_KEY
     if configured_key is None:
         raise AuthenticationConfigurationError("JWT_SECRET_KEY is not configured")
-    key = configured_key.get_secret_value()
+    if hasattr(configured_key, "get_secret_value"):
+        key = configured_key.get_secret_value()
+    else:
+        key = str(configured_key)
     if len(key.encode("utf-8")) < 32:
         raise AuthenticationConfigurationError("JWT_SECRET_KEY must contain at least 32 bytes")
     return key

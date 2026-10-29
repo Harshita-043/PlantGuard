@@ -345,7 +345,7 @@ async def _read_validated_image(file: UploadFile) -> tuple[bytes, str]:
                 size += len(chunk)
                 if size > MAX_IMAGE_BYTES:
                     raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                         detail="File size too large. Maximum 10MB allowed.",
                     )
                 temporary_file.write(chunk)

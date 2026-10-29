@@ -54,7 +54,11 @@ export default function ScanPage() {
         navigate(`/scan/results/${encodeURIComponent(caught.analysisId)}`);
         return;
       }
-      setError(caught instanceof Error ? caught.message : "The image could not be uploaded.");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The image could not be uploaded.",
+      );
     } finally {
       setIsUploading(false);
     }
@@ -66,9 +70,12 @@ export default function ScanPage() {
         <span className="mx-auto mb-4 grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary">
           <ScanLine size={24} />
         </span>
-        <h2 className="text-2xl font-semibold tracking-[-0.04em]">Save a plant image</h2>
+        <h2 className="text-2xl font-semibold tracking-[-0.04em]">
+          Save a plant image
+        </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          The image is saved to your account and analyzed when the configured model runtime and artifacts are available.
+          The image is saved to your account and analyzed when the configured
+          model runtime and artifacts are available.
         </p>
       </div>
 
@@ -82,19 +89,39 @@ export default function ScanPage() {
           disabled={isUploading}
           className="block w-full rounded-lg border border-border p-3 text-sm"
         />
-        <p className="text-xs text-muted-foreground">JPEG, PNG, or WebP. Maximum size 10 MB.</p>
-        {imageFile && <p className="text-sm text-muted-foreground">Selected: {imageFile.name}</p>}
+        <p className="text-xs text-muted-foreground">
+          JPEG, PNG, or WebP. Maximum size 10 MB.
+        </p>
+        {imageFile && (
+          <p className="text-sm text-muted-foreground">
+            Selected: {imageFile.name}
+          </p>
+        )}
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+        <div
+          className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive"
+          role="alert"
+        >
           <AlertTriangle size={18} className="mt-0.5 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
-      <Button onClick={() => void handleUpload()} disabled={!imageFile || isUploading || !accessToken} className="w-full">
-        {isUploading ? <><Loader size={16} className="mr-2 animate-spin" />Analyzing image…</> : "Analyze plant image"}
+      <Button
+        onClick={() => void handleUpload()}
+        disabled={!imageFile || isUploading || !accessToken}
+        className="w-full"
+      >
+        {isUploading ? (
+          <>
+            <Loader size={16} className="mr-2 animate-spin" />
+            Analyzing image…
+          </>
+        ) : (
+          "Analyze plant image"
+        )}
       </Button>
     </section>
   );

@@ -76,11 +76,34 @@
     --sidebar-ring: 142 45% 58%;
   }
 
-  * { @apply border-border; }
-  html { font-family: "DM Sans", sans-serif; color-scheme: light; }
-  html.dark { color-scheme: dark; }
-  body { @apply bg-background text-foreground antialiased; min-width: 320px; }
-  h1, h2, h3, h4 { font-family: "Manrope", sans-serif; }
-  button, a, input { -webkit-tap-highlight-color: transparent; }
-  button:focus-visible, a:focus-visible, input:focus-visible { @apply outline-none ring-2 ring-primary/40 ring-offset-2 ring-offset-background; }
+  * {
+    @apply border-border;
+  }
+  html {
+    font-family: "DM Sans", sans-serif;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    min-width: 320px;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: "Manrope", sans-serif;
+  }
+  button,
+  a,
+  input {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible {
+    @apply outline-none ring-2 ring-primary/40 ring-offset-2 ring-offset-background;
+  }
 }

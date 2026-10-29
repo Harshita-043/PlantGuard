@@ -8,7 +8,8 @@ export default function PlantsPage() {
       </span>
       <h2 className="mt-5 text-2xl font-semibold">No plant records</h2>
       <p className="mt-3 text-sm text-muted-foreground">
-        Plant records cannot be created or loaded because the backend has no plant persistence API.
+        Plant records cannot be created or loaded because the backend has no
+        plant persistence API.
       </p>
     </section>
   );

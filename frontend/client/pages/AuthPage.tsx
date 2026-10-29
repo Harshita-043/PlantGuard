@@ -13,10 +13,19 @@ export default function AuthPage({ mode }: AuthPageProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const auth = useAuth();
-  const routeState = typeof location.state === "object" && location.state !== null ? location.state : {};
-  const initialEmail = "email" in routeState && typeof routeState.email === "string" ? routeState.email : "";
-  const registered = "registered" in routeState && routeState.registered === true;
-  const sessionExpired = auth.sessionExpired || ("sessionExpired" in routeState && routeState.sessionExpired === true);
+  const routeState =
+    typeof location.state === "object" && location.state !== null
+      ? location.state
+      : {};
+  const initialEmail =
+    "email" in routeState && typeof routeState.email === "string"
+      ? routeState.email
+      : "";
+  const registered =
+    "registered" in routeState && routeState.registered === true;
+  const sessionExpired =
+    auth.sessionExpired ||
+    ("sessionExpired" in routeState && routeState.sessionExpired === true);
 
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
@@ -33,7 +42,11 @@ export default function AuthPage({ mode }: AuthPageProps) {
         await auth.register(email, password);
         navigate("/login", {
           replace: true,
-          state: { from: getReturnPath(location.state), registered: true, email },
+          state: {
+            from: getReturnPath(location.state),
+            registered: true,
+            email,
+          },
         });
       } else {
         await auth.login(email, password);
@@ -53,7 +66,11 @@ export default function AuthPage({ mode }: AuthPageProps) {
   return (
     <main className="grid min-h-screen place-items-center bg-background px-4 py-10">
       <section className="w-full max-w-md rounded-[28px] border border-border/80 bg-card p-7 shadow-sm sm:p-9">
-        <Link to="/login" className="mx-auto flex w-fit items-center gap-3" aria-label="PlantGuard sign in">
+        <Link
+          to="/login"
+          className="mx-auto flex w-fit items-center gap-3"
+          aria-label="PlantGuard sign in"
+        >
           <span className="grid size-11 place-items-center rounded-xl bg-primary text-primary-foreground">
             <Leaf size={22} />
           </span>
@@ -65,34 +82,50 @@ export default function AuthPage({ mode }: AuthPageProps) {
             {isRegister ? "Create your account" : "Welcome back"}
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            {isRegister ? "Register with your email to get started." : "Sign in to continue to PlantGuard."}
+            {isRegister
+              ? "Register with your email to get started."
+              : "Sign in to continue to PlantGuard."}
           </p>
         </div>
 
         {registered && !isRegister && (
-          <p className="mt-6 rounded-xl border border-primary/20 bg-primary/5 p-3 text-sm" role="status">
+          <p
+            className="mt-6 rounded-xl border border-primary/20 bg-primary/5 p-3 text-sm"
+            role="status"
+          >
             Account created. Sign in with your new credentials.
           </p>
         )}
         {sessionExpired && !isRegister && (
-          <p className="mt-6 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm" role="status">
+          <p
+            className="mt-6 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm"
+            role="status"
+          >
             Your session expired. Sign in again to continue.
           </p>
         )}
         {auth.error && (
-          <p className="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm" role="alert">
+          <p
+            className="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm"
+            role="alert"
+          >
             The saved session could not be verified: {auth.error}
           </p>
         )}
         {error && (
-          <p className="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" role="alert">
+          <p
+            className="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+            role="alert"
+          >
             {error}
           </p>
         )}
 
         <form className="mt-7 space-y-5" onSubmit={handleSubmit}>
           <div className="space-y-2">
-            <label htmlFor="email" className="text-sm font-medium">Email</label>
+            <label htmlFor="email" className="text-sm font-medium">
+              Email
+            </label>
             <input
               id="email"
               name="email"
@@ -106,7 +139,9 @@ export default function AuthPage({ mode }: AuthPageProps) {
             />
           </div>
           <div className="space-y-2">
-            <label htmlFor="password" className="text-sm font-medium">Password</label>
+            <label htmlFor="password" className="text-sm font-medium">
+              Password
+            </label>
             <input
               id="password"
               name="password"
@@ -119,15 +154,27 @@ export default function AuthPage({ mode }: AuthPageProps) {
               onChange={(event) => setPassword(event.target.value)}
               className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
-            {isRegister && <p className="text-xs text-muted-foreground">Use 12 to 128 characters.</p>}
+            {isRegister && (
+              <p className="text-xs text-muted-foreground">
+                Use 12 to 128 characters.
+              </p>
+            )}
           </div>
           <button
             type="submit"
             disabled={isSubmitting}
             className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSubmitting && <LoaderCircle size={16} className="animate-spin" />}
-            {isSubmitting ? (isRegister ? "Creating account…" : "Signing in…") : isRegister ? "Create account" : "Sign in"}
+            {isSubmitting && (
+              <LoaderCircle size={16} className="animate-spin" />
+            )}
+            {isSubmitting
+              ? isRegister
+                ? "Creating account…"
+                : "Signing in…"
+              : isRegister
+                ? "Create account"
+                : "Sign in"}
           </button>
         </form>
 
