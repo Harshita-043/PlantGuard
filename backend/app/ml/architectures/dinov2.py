@@ -10,7 +10,7 @@ or dependencies on torch.hub / Hugging Face Hub downloads.
 """
 
 import math
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -147,7 +147,12 @@ class DinoBackbone(nn.Module):
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
         return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
 
-    def forward(self, x: torch.Tensor, return_attention: bool = False) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    def forward(
+        self,
+        x: torch.Tensor,
+        return_attention: bool = False,
+        return_all_attentions: bool = False,
+    ) -> Tuple[torch.Tensor, Any]:
         B, C, H, W = x.shape
         tokens = self.patch_embed(x)
         cls_tokens = self.cls_token.expand(B, -1, -1)
@@ -156,13 +161,18 @@ class DinoBackbone(nn.Module):
         pos = self.interpolate_pos_encoding(tokens, W, H)
         tokens = tokens + pos
 
+        all_attns = []
         last_attn = None
         for blk in self.blocks:
             tokens, last_attn = blk(tokens)
+            if return_all_attentions:
+                all_attns.append(last_attn)
 
         tokens = self.norm(tokens)
         cls_output = tokens[:, 0]
 
+        if return_all_attentions:
+            return cls_output, all_attns
         if return_attention:
             return cls_output, last_attn
         return cls_output, None
@@ -196,10 +206,19 @@ class DinoClassifierModel(nn.Module):
             nn.Linear(embed_dim, num_classes),
         )
 
-    def forward(self, x: torch.Tensor, return_attention: bool = False):
-        feat, attn = self.backbone(x, return_attention=return_attention)
+    def forward(
+        self,
+        x: torch.Tensor,
+        return_attention: bool = False,
+        return_all_attentions: bool = False,
+    ):
+        feat, attn = self.backbone(
+            x,
+            return_attention=return_attention,
+            return_all_attentions=return_all_attentions,
+        )
         logits = self.head(feat)
-        if return_attention:
+        if return_attention or return_all_attentions:
             return logits, attn
         return logits
 

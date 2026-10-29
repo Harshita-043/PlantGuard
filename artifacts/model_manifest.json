@@ -1,0 +1,281 @@
+{
+  "generated_at_utc": "2026-10-27T06:59:29.046035+00:00",
+  "manifest_status": "checksums_recorded",
+  "models": {
+    "dinov2_vitb14_classifier": {
+      "architecture": "DINOv2 ViT-B/14 with LayerNorm and 38-class linear head",
+      "display_name": "DINOv2 ViT-B/14 disease classifier",
+      "label_mapping_identity": {
+        "class_count": 38,
+        "path": "artifacts/dino_disease/classes.json",
+        "sha256": "F8988B3E341ACB2E461EA8DD1CAF9D3492A925405A32BCC57A79113237842AA4"
+      },
+      "original_checkpoint": {
+        "path": "artifacts/dino_disease/dino_disease_classifier.pt",
+        "sha256": "a219227893ef855fb8a96d105489d513a29130e19418d97b09be433247130081",
+        "sha256_status": "verified_by_streaming_sha256"
+      },
+      "preprocessing_identity": {
+        "description": "RGB 224x224, ImageNet mean/std.",
+        "implementation": "backend/app/ml/adapters/disease_classifier.py"
+      },
+      "source_checkpoint_identity": "Repository checkpoint; training provenance is unverified.",
+      "variants": [
+        {
+          "backend": "pytorch-native-dinov2",
+          "benchmark": {
+            "compatibility_results": {
+              "cpu": "blocked_runtime_not_installed",
+              "cuda": "blocked_runtime_not_installed"
+            },
+            "latency_ms": null,
+            "model_load_ms": null,
+            "ram_peak_gb": null,
+            "status": "not_measured",
+            "vram_peak_gb": null
+          },
+          "created": {
+            "date": null,
+            "tool": "original artifact",
+            "version": null
+          },
+          "device_profiles": [
+            "cpu",
+            "cuda"
+          ],
+          "kind": "original",
+          "label_mapping_identity": "same_as_model",
+          "path": "artifacts/dino_disease/dino_disease_classifier.pt",
+          "precision": "fp32",
+          "preprocessing_identity": "same_as_model",
+          "quantization_method": "none",
+          "rollback_target": null,
+          "runtime_requirements": [
+            "PyTorch"
+          ],
+          "sha256": "a219227893ef855fb8a96d105489d513a29130e19418d97b09be433247130081",
+          "sha256_status": "verified_by_streaming_sha256",
+          "source_checkpoint_identity": "same_as_model",
+          "validation": {
+            "dataset": null,
+            "quality_metrics": null,
+            "split": null,
+            "status": "not_evaluated"
+          },
+          "variant_id": "original-pytorch-fp32"
+        }
+      ]
+    },
+    "dinov2_vits14_leaf_filter": {
+      "architecture": "DINOv2 ViT-S/14 with binary classification head",
+      "display_name": "DINOv2 ViT-S/14 leaf filter",
+      "label_mapping_identity": {
+        "labels": [
+          "negative",
+          "positive"
+        ],
+        "source": "backend/app/ml/adapters/leaf_filter.py"
+      },
+      "original_checkpoint": {
+        "path": "artifacts/dino_leaf_filter/dino_leaf_filter_v2.pt",
+        "sha256": "03b3fb0337f60072d95f39634049bab211f4187b26343254595822413e30a268",
+        "sha256_status": "verified_by_streaming_sha256"
+      },
+      "preprocessing_identity": {
+        "description": "RGB 224x224, ImageNet mean/std; adapter-defined binary mapping negative=0, positive=1.",
+        "implementation": "backend/app/ml/adapters/leaf_filter.py"
+      },
+      "source_checkpoint_identity": "Repository v2 checkpoint; training provenance and correspondence to existing v1 evaluation are unverified.",
+      "variants": [
+        {
+          "backend": "pytorch-native-dinov2",
+          "benchmark": {
+            "compatibility_results": {
+              "cpu": "blocked_runtime_not_installed",
+              "cuda": "blocked_runtime_not_installed"
+            },
+            "latency_ms": null,
+            "model_load_ms": null,
+            "ram_peak_gb": null,
+            "status": "not_measured",
+            "vram_peak_gb": null
+          },
+          "created": {
+            "date": null,
+            "tool": "original artifact",
+            "version": null
+          },
+          "device_profiles": [
+            "cpu",
+            "cuda"
+          ],
+          "kind": "original",
+          "label_mapping_identity": "same_as_model",
+          "path": "artifacts/dino_leaf_filter/dino_leaf_filter_v2.pt",
+          "precision": "fp32",
+          "preprocessing_identity": "same_as_model",
+          "quantization_method": "none",
+          "rollback_target": null,
+          "runtime_requirements": [
+            "PyTorch"
+          ],
+          "sha256": "03b3fb0337f60072d95f39634049bab211f4187b26343254595822413e30a268",
+          "sha256_status": "verified_by_streaming_sha256",
+          "source_checkpoint_identity": "same_as_model",
+          "validation": {
+            "dataset": null,
+            "quality_metrics": null,
+            "split": null,
+            "status": "not_evaluated_for_this_checkpoint"
+          },
+          "variant_id": "original-pytorch-fp32"
+        }
+      ]
+    },
+    "sam2_hiera_base_plus": {
+      "architecture": "SAM 2.1 Hiera Base Plus",
+      "display_name": "SAM 2.1 Hiera Base Plus",
+      "label_mapping_identity": {
+        "description": "Instance candidate masks; no semantic class mapping."
+      },
+      "original_checkpoint": {
+        "path": "artifacts/sam2/sam2.1_hiera_base_plus.pt",
+        "sha256": "a2345aede8715ab1d5d31b4a509fb160c5a4af1970f199d9054ccfb746c004c5",
+        "sha256_status": "verified_by_streaming_sha256"
+      },
+      "preprocessing_identity": {
+        "config": "configs/sam2.1/sam2.1_hiera_b+.yaml",
+        "description": "Official SAM2 automatic mask generator preprocessing; exact resolved package config not available on this host.",
+        "sha256": null
+      },
+      "source_checkpoint_identity": "Checkpoint SHA-256 is recorded; official source origin confirmation remains pending.",
+      "variants": [
+        {
+          "backend": "pytorch-sam2",
+          "benchmark": {
+            "compatibility_results": {
+              "cpu": "blocked_runtime_not_installed",
+              "cuda": "blocked_runtime_not_installed"
+            },
+            "latency_ms": null,
+            "model_load_ms": null,
+            "ram_peak_gb": null,
+            "status": "not_measured",
+            "vram_peak_gb": null
+          },
+          "created": {
+            "date": null,
+            "tool": "original artifact",
+            "version": null
+          },
+          "device_profiles": [
+            "cpu",
+            "cuda"
+          ],
+          "kind": "original",
+          "label_mapping_identity": "same_as_model",
+          "path": "artifacts/sam2/sam2.1_hiera_base_plus.pt",
+          "precision": "fp32",
+          "preprocessing_identity": "same_as_model",
+          "quantization_method": "none",
+          "rollback_target": null,
+          "runtime_requirements": [
+            "compatible PyTorch build",
+            "SAM2 v1.1.0 package",
+            "official Hiera Base Plus package config"
+          ],
+          "sha256": "a2345aede8715ab1d5d31b4a509fb160c5a4af1970f199d9054ccfb746c004c5",
+          "sha256_status": "verified_by_streaming_sha256",
+          "source_checkpoint_identity": "same_as_model",
+          "validation": {
+            "dataset": null,
+            "quality_metrics": null,
+            "split": null,
+            "status": "not_evaluated"
+          },
+          "variant_id": "original-pytorch-fp32"
+        }
+      ]
+    },
+    "segformer_b0_plantseg": {
+      "architecture": "NVIDIA SegFormer-B0 semantic segmentation",
+      "display_name": "SegFormer-B0 PlantSeg segmenter",
+      "label_mapping_identity": {
+        "labels": {
+          "0": "background",
+          "1": "diseased_region"
+        },
+        "source": "verified config.json and adapter mapping check"
+      },
+      "original_checkpoint": {
+        "path": "outputs/segformer_plantseg/best_model/model.safetensors",
+        "sha256": "5e188bbebe7782ecaed12e494eda81f97ff7d53336b24015c57d4ba41c08621a",
+        "sha256_status": "verified_by_streaming_sha256"
+      },
+      "preprocessing_identity": {
+        "config_path": "outputs/segformer_plantseg/best_model/config.json",
+        "config_sha256": "2CC0AB73A3B2B2E1007E0A8A60CD340DB6F1953E54B514AD945E07D635493CA7",
+        "path": "outputs/segformer_plantseg/best_model/preprocessing.json",
+        "sha256": "18A4464B70DD698FAFA5333C54C0BFD21ABD889A29E294C66042064CA49EC4C8"
+      },
+      "source_checkpoint_identity": "Repository training_summary.json records a PlantSeg nvidia/mit-b0 run, but checkpoint-to-run identity, dataset and split provenance remain unverified.",
+      "variants": [
+        {
+          "backend": "pytorch-transformers",
+          "benchmark": {
+            "compatibility_results": {
+              "cpu": "blocked_runtime_not_installed",
+              "cuda": "blocked_runtime_not_installed"
+            },
+            "latency_ms": null,
+            "model_load_ms": null,
+            "ram_peak_gb": null,
+            "status": "not_measured",
+            "vram_peak_gb": null
+          },
+          "created": {
+            "date": null,
+            "tool": "original artifact",
+            "version": null
+          },
+          "device_profiles": [
+            "cpu",
+            "cuda"
+          ],
+          "kind": "original",
+          "label_mapping_identity": "same_as_model",
+          "path": "outputs/segformer_plantseg/best_model/model.safetensors",
+          "precision": "fp32",
+          "preprocessing_identity": "same_as_model",
+          "quantization_method": "none",
+          "rollback_target": null,
+          "runtime_requirements": [
+            "PyTorch",
+            "Transformers",
+            "safetensors"
+          ],
+          "sha256": "5e188bbebe7782ecaed12e494eda81f97ff7d53336b24015c57d4ba41c08621a",
+          "sha256_status": "verified_by_streaming_sha256",
+          "source_checkpoint_identity": "same_as_model",
+          "validation": {
+            "dataset": null,
+            "quality_metrics": {
+              "reported_validation_dice": 0.787,
+              "source": "outputs/segformer_plantseg/training_summary.json; not independently reproduced"
+            },
+            "split": null,
+            "status": "partial_historical_report_only"
+          },
+          "variant_id": "original-transformers-fp32"
+        }
+      ]
+    }
+  },
+  "notes": [
+    "Original checkpoints are immutable. No optimized variants are registered.",
+    "Phase 6 check (2026-10-27): SHA-256 hashes were recorded from the local checkpoint files. These hashes verify byte identity only; source authenticity and training lineage remain unverified.",
+    "Unverified measurements and provenance remain null rather than inferred from filenames or historical reports."
+  ],
+  "schema_version": "1.0.0",
+  "source_revision": "8520c8277632fa94c60e1b2483d32c38be340d55"
+}

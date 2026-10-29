@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-test:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          python -m venv venv_ml
+          .\venv_ml\Scripts\Activate.ps1
+          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-ml.txt
+
+      - name: Run backend tests
+        run: |
+          .\venv_ml\Scripts\Activate.ps1
+          pytest -q backend/app/tests
+
+  frontend-test:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Typecheck
+        run: |
+          cd frontend
+          npm run typecheck
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+
+  docker-build:
+    runs-on: windows-latest
+    needs: [backend-test, frontend-test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: |
+          docker build -t plantguard-backend -f backend/Dockerfile.cpu .
+
+      - name: Build frontend production image
+        run: |
+          docker build -t plantguard-frontend -f frontend/Dockerfile .
+

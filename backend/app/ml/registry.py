@@ -67,17 +67,24 @@ class ModelRegistry:
         inventory = {}
 
         # 1. DINOv2 Leaf Filter
-        lf_path = self.workspace_root / "artifacts" / "dino_leaf_filter" / "dino_leaf_filter.pt"
+        from app.core.config import settings
+        lf_v1_path = self.workspace_root / "artifacts" / "dino_leaf_filter" / "dino_leaf_filter.pt"
         lf_v2_path = self.workspace_root / "artifacts" / "dino_leaf_filter" / "dino_leaf_filter_v2.pt"
-        chosen_lf = lf_v2_path if lf_v2_path.exists() else lf_path
+        selected_version = getattr(settings, "PLANTGUARD_LEAF_FILTER_VERSION", "v1").lower()
+        if selected_version == "v2":
+            chosen_lf = lf_v2_path
+            ver_label = "v2"
+        else:
+            chosen_lf = lf_v1_path
+            ver_label = "v1"
         inventory["leaf_filter"] = ArtifactDescriptor(
-            name="DINOv2 Small Leaf Filter",
+            name=f"DINOv2 Small Leaf Filter ({ver_label})",
             relative_path=str(chosen_lf.relative_to(self.workspace_root) if chosen_lf.exists() else chosen_lf),
             resolved_path=chosen_lf if chosen_lf.exists() else None,
             size_bytes=chosen_lf.stat().st_size if chosen_lf.exists() else 0,
             is_valid=chosen_lf.exists() and chosen_lf.stat().st_size > 10_000_000,
             format_type="pytorch_zip",
-            metadata={"classes": ["negative", "positive"], "backbone": "dinov2_vits14"},
+            metadata={"classes": ["negative", "positive"], "backbone": "dinov2_vits14", "version": ver_label},
         )
 
         # 2. DINOv2 Disease Classifier

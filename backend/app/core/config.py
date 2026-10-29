@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     PLANTGUARD_REMOTE_TIMEOUT_SECONDS: float = Field(default=60, gt=0, le=300)
     PLANTGUARD_REMOTE_MAX_CONCURRENCY: int = Field(default=1, ge=1, le=8)
     PLANTGUARD_DIAGNOSTICS_TOKEN: Optional[SecretStr] = None
+    PLANTGUARD_LEAF_FILTER_VERSION: str = "v1"
+    PLANTGUARD_DISEASE_CLASSIFIER_VARIANT: str = "onnx_fp32"
+    PLANTGUARD_SEGFORMER_VARIANT: str = "onnx_int8"
 
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env")
 
