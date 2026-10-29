@@ -51,6 +51,7 @@ class SupabaseStorageAdapter:
                         read_timeout=20,
                         retries={"max_attempts": 2, "mode": "standard"},
                         s3={"addressing_style": "path"},
+                        signature_version="s3v4",
                     ),
                 )
             except BotoCoreError:

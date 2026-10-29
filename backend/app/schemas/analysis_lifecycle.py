@@ -24,6 +24,7 @@ class AnalysisLifecycleResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     analysis_id: UUID
+    plant_id: UUID | None = None
     status: Literal["pending", "completed", "failed"]
     created_at: datetime
     image_content_type: str

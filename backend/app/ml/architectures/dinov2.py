@@ -211,6 +211,7 @@ class DinoClassifierModel(nn.Module):
         x: torch.Tensor,
         return_attention: bool = False,
         return_all_attentions: bool = False,
+        return_features: bool = False,
     ):
         feat, attn = self.backbone(
             x,
@@ -218,6 +219,10 @@ class DinoClassifierModel(nn.Module):
             return_all_attentions=return_all_attentions,
         )
         logits = self.head(feat)
+        if return_features:
+            if return_attention or return_all_attentions:
+                return logits, attn, feat
+            return logits, feat
         if return_attention or return_all_attentions:
             return logits, attn
         return logits

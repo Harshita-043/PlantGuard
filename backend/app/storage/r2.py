@@ -50,6 +50,7 @@ class CloudflareR2ObjectStorage:
                         connect_timeout=3,
                         read_timeout=20,
                         retries={"max_attempts": 2, "mode": "standard"},
+                        signature_version="s3v4",
                     ),
                 )
             except BotoCoreError:

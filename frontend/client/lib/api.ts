@@ -2,12 +2,20 @@ import type {
   AnalysisAssetLink,
   AnalysisAssetsResponse,
   AnalysisLifecycleResponse,
+  DashboardMetricsResponse,
+  PlantDetailResponse,
+  PlantPayload,
+  PlantResponse,
 } from "@shared/api";
 
 export type {
   AnalysisAssetLink,
   AnalysisAssetsResponse,
   AnalysisLifecycleResponse,
+  DashboardMetricsResponse,
+  PlantDetailResponse,
+  PlantPayload,
+  PlantResponse,
 } from "@shared/api";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "";
@@ -89,11 +97,13 @@ export const analysisApi = {
   analyzeImage(
     imageFile: File,
     accessToken: string,
+    plantId?: string,
   ): Promise<AnalysisLifecycleResponse> {
     const formData = new FormData();
     formData.append("file", imageFile);
+    const query = plantId ? `?plant_id=${encodeURIComponent(plantId)}` : "";
     return authenticatedRequest<AnalysisLifecycleResponse>(
-      "/api/v1/analyze/image",
+      `/api/v1/analyze/image${query}`,
       accessToken,
       {
         method: "POST",
@@ -149,6 +159,93 @@ export const analysisApi = {
     return authenticatedRequest<AnalysisLifecycleResponse[]>(
       `/api/v1/analyses?${query}`,
       accessToken,
+    );
+  },
+};
+
+export const dashboardApi = {
+  getMetrics(accessToken: string): Promise<DashboardMetricsResponse> {
+    return authenticatedRequest<DashboardMetricsResponse>(
+      "/api/v1/dashboard/metrics",
+      accessToken,
+    );
+  },
+};
+
+export const plantsApi = {
+  getPlants(accessToken: string): Promise<PlantResponse[]> {
+    return authenticatedRequest<PlantResponse[]>("/api/v1/plants", accessToken);
+  },
+
+  getPlant(
+    plantId: string,
+    accessToken: string,
+  ): Promise<PlantDetailResponse> {
+    return authenticatedRequest<PlantDetailResponse>(
+      `/api/v1/plants/${encodeURIComponent(plantId)}`,
+      accessToken,
+    );
+  },
+
+  createPlant(
+    payload: PlantPayload,
+    accessToken: string,
+  ): Promise<PlantResponse> {
+    return authenticatedRequest<PlantResponse>("/api/v1/plants", accessToken, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  updatePlant(
+    plantId: string,
+    payload: PlantPayload,
+    accessToken: string,
+  ): Promise<PlantResponse> {
+    return authenticatedRequest<PlantResponse>(
+      `/api/v1/plants/${encodeURIComponent(plantId)}`,
+      accessToken,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+  },
+
+  async deletePlant(plantId: string, accessToken: string): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/api/v1/plants/${encodeURIComponent(plantId)}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+    );
+    if (!response.ok) throw await readError(response);
+  },
+
+  associateScan(
+    plantId: string,
+    analysisId: string,
+    accessToken: string,
+  ): Promise<AnalysisLifecycleResponse> {
+    return authenticatedRequest<AnalysisLifecycleResponse>(
+      `/api/v1/plants/${encodeURIComponent(plantId)}/scans/${encodeURIComponent(analysisId)}`,
+      accessToken,
+      { method: "POST" },
+    );
+  },
+
+  disassociateScan(
+    plantId: string,
+    analysisId: string,
+    accessToken: string,
+  ): Promise<AnalysisLifecycleResponse> {
+    return authenticatedRequest<AnalysisLifecycleResponse>(
+      `/api/v1/plants/${encodeURIComponent(plantId)}/scans/${encodeURIComponent(analysisId)}`,
+      accessToken,
+      { method: "DELETE" },
     );
   },
 };

@@ -1,11 +1,12 @@
-import { useCallback, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertTriangle, Loader, ScanLine } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/auth/AuthContext";
-import { ApiError, analysisApi } from "@/lib/api";
+import { ApiError, analysisApi, plantsApi } from "@/lib/api";
+import type { PlantResponse } from "@shared/api";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const SUPPORTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -14,8 +15,36 @@ export default function ScanPage() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [plants, setPlants] = useState<PlantResponse[]>([]);
+  const [selectedPlantId, setSelectedPlantId] = useState("");
   const { accessToken, logout } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    setSelectedPlantId(searchParams.get("plant_id") ?? "");
+  }, [searchParams]);
+
+  useEffect(() => {
+    let active = true;
+    if (!accessToken) return;
+    plantsApi
+      .getPlants(accessToken)
+      .then((records) => {
+        if (active) setPlants(records);
+      })
+      .catch((caught: unknown) => {
+        if (caught instanceof ApiError && caught.status === 401) {
+          logout();
+          navigate("/login", { replace: true });
+        } else if (active) {
+          setError(caught instanceof Error ? caught.message : "Plant list could not be loaded.");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [accessToken, logout, navigate]);
 
   const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
@@ -42,7 +71,11 @@ export default function ScanPage() {
     setIsUploading(true);
     setError(null);
     try {
-      const analysis = await analysisApi.analyzeImage(imageFile, accessToken);
+      const analysis = await analysisApi.analyzeImage(
+        imageFile,
+        accessToken,
+        selectedPlantId || undefined,
+      );
       navigate(`/scan/results/${analysis.analysis_id}`);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
@@ -62,7 +95,7 @@ export default function ScanPage() {
     } finally {
       setIsUploading(false);
     }
-  }, [accessToken, imageFile, logout, navigate]);
+  }, [accessToken, imageFile, logout, navigate, selectedPlantId]);
 
   return (
     <section className="mx-auto max-w-2xl space-y-6 rounded-2xl border border-border bg-card p-6 sm:p-8">
@@ -77,6 +110,24 @@ export default function ScanPage() {
           The image is saved to your account and analyzed when the configured
           model runtime and artifacts are available.
         </p>
+      </div>
+
+      <div className="space-y-3">
+        <label className="grid gap-2 text-sm" htmlFor="plant-association">
+          Associate with a plant (optional)
+          <select
+            id="plant-association"
+            value={selectedPlantId}
+            onChange={(event) => setSelectedPlantId(event.target.value)}
+            disabled={isUploading}
+            className="rounded-lg border border-border bg-background p-3"
+          >
+            <option value="">No plant association</option>
+            {plants.map((plant) => (
+              <option key={plant.id} value={plant.id}>{plant.name}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="space-y-3">

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, analysisApi } from "@/lib/api";
+import { ApiError, analysisApi, dashboardApi, plantsApi } from "@/lib/api";
 
 describe("analysis API errors", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -76,6 +76,65 @@ describe("analysis assets and deletion", () => {
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe(
       "Bearer owner-token",
     );
+  });
+
+  describe("dashboard, plants, and scan association API", () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("requests real dashboard metrics with authentication", async () => {
+      const body = { total_analyses: 2, recent_scans: [], health_trend: [] };
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(dashboardApi.getMetrics("owner-token")).resolves.toEqual(body);
+      expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/dashboard/metrics");
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer owner-token");
+    });
+
+    it("creates plants using the authenticated API", async () => {
+      const body = { id: "plant-1", name: "Basil" };
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(
+        plantsApi.createPlant(
+          { name: "Basil", species: null, location: null, notes: null },
+          "owner-token",
+        ),
+      ).resolves.toEqual(body);
+      expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/plants");
+      expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer owner-token");
+    });
+
+    it("passes the selected plant ID with a scan upload", async () => {
+      const body = { analysis_id: "scan-1" };
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await analysisApi.analyzeImage(
+        new File(["image"], "leaf.png", { type: "image/png" }),
+        "owner-token",
+        "plant-1",
+      );
+      expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/analyze/image?plant_id=plant-1");
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer owner-token");
+    });
   });
 
   it("fetches local proxy assets with owner authentication", async () => {

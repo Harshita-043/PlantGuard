@@ -58,6 +58,7 @@ from app.schemas.inference import (
     SingleLeafAnalysis,
     WarningSeverity,
 )
+from app.storage.errors import StorageError
 from app.storage.interface import ObjectStorage
 
 logger = logging.getLogger(__name__)
@@ -192,7 +193,7 @@ class PlantAnalysisService:
                 raise NoLeafFoundError("SAM2 candidates did not pass the DINOv2 ViT-S/14 leaf filter")
 
             # DINOv2 ViT-B/14 classifies only accepted leaf crops.
-            predictions: list[tuple[tuple[LeafCandidate, np.ndarray, LeafFilterScore], DiseasePrediction, np.ndarray | None]] = []
+            predictions: list[tuple[tuple[LeafCandidate, np.ndarray, LeafFilterScore], DiseasePrediction, np.ndarray | None, np.ndarray | None]] = []
             t0 = time.perf_counter()
             def classify(adapter):
                 class_map = adapter.get_class_mapping() or {}
@@ -203,9 +204,14 @@ class PlantAnalysisService:
                     crop = accepted_item[1]
                     model_input = self._validated_input(adapter.preprocess(crop), (1, 3, 224, 224), "classifier")
                     attention = None
+                    features = None
                     if hasattr(adapter, "predict_with_attention"):
                         try:
-                            probs, attention = adapter.predict_with_attention(model_input)
+                            res = adapter.predict_with_attention(model_input, return_features=True)
+                            if isinstance(res, tuple) and len(res) == 3:
+                                probs, attention, features = res
+                            else:
+                                probs, attention = res
                         except Exception as exc:
                             probs = adapter.predict(model_input)
                             logger.warning("inference_stage_unavailable stage=explainability runtime=%s model=%s error_code=explanation_unavailable error_type=%s",
@@ -222,7 +228,7 @@ class PlantAnalysisService:
                         probabilities=tuple(float(p) for p in distribution[0]),
                         model_version=adapter.artifact_version,
                     )
-                    predictions.append((accepted_item, prediction, attention))
+                    predictions.append((accepted_item, prediction, attention, features))
             self._with_model(self.classifier, "classifier", classify)
             timings["classifier"] = self._elapsed(t0)
             logger.info("inference_stage_complete stage=classifier leaves=%d runtime=%s model=%s duration_ms=%d",
@@ -236,7 +242,7 @@ class PlantAnalysisService:
                 if mapping != {0: "background", 1: "diseased_region"}:
                     raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
                                          "SegFormer label mapping does not match the PlantSeg checkpoint", stage="segmentation")
-                for idx, (accepted_item, prediction, attention) in enumerate(predictions):
+                for idx, (accepted_item, prediction, attention, features) in enumerate(predictions):
                     candidate, crop, filter_score = accepted_item
                     leaf_confidence = filter_score.confidence
                     model_input = self._validated_input(adapter.preprocess(crop), (1, 3, 512, 512), "segmentation")
@@ -293,8 +299,18 @@ class PlantAnalysisService:
                         calibration_status="incomplete",
                     )
 
+                    crop_asset = self._persist_rgb_image(crop, scan_id, f"leaf_{idx}_crop.png")
                     mask_asset = self._persist_mask(disease_mask, scan_id, f"leaf_{idx}_disease_mask.png")
                     leaf_asset = self._persist_mask(leaf_mask.astype(np.uint8), scan_id, f"leaf_{idx}_leaf_mask.png")
+
+                    # Generate lesion overlay onto crop
+                    lesion_overlay = crop.copy()
+                    if np.any(disease_mask):
+                        lesion_overlay[disease_mask == 1] = (
+                            0.45 * lesion_overlay[disease_mask == 1] + 0.55 * np.array([230, 50, 50], dtype=np.uint8)
+                        ).astype(np.uint8)
+                    lesion_overlay_asset = self._persist_rgb_image(lesion_overlay, scan_id, f"leaf_{idx}_lesion_overlay.png")
+
                     diseased_pixels = int(np.count_nonzero(disease_mask))
                     total_leaf_pixels = int(np.count_nonzero(leaf_mask))
                     seg_result = SegmentationResult(
@@ -306,20 +322,95 @@ class PlantAnalysisService:
                         disease_bounding_box=SeverityEstimator.compute_disease_bounding_box(disease_mask),
                     )
                     severity = SeverityEstimator.estimate_severity(disease_mask, leaf_mask)
+                    attn_overlay_asset = None
+                    artifact_warnings: list[PipelineWarning] = []
                     if attention is not None:
                         try:
                             explanation = self._persist_attention(attention, crop.shape[:2], scan_id, idx)
-                        except Exception as exc:
-                            logger.warning("inference_stage_unavailable stage=explainability runtime=%s model=%s error_code=explanation_unavailable error_type=%s",
-                                           self.device, self.classifier.artifact_version, type(exc).__name__)
-                            explanation = ExplainabilityResult(status="unavailable", method="dinov2_gradient_weighted_attention",
-                                                               description="Attribution could not be computed or stored.")
+                        except InferenceError as exc:
+                            logger.warning(
+                                "inference_stage_unavailable stage=explainability error_code=%s",
+                                exc.code.value,
+                            )
+                            explanation = ExplainabilityResult(
+                                status="unavailable",
+                                method="dinov2_attention_rollout",
+                                description="Attribution could not be generated or saved.",
+                            )
+                            if exc.code == InferenceErrorCode.ARTIFACT_STORAGE_FAILURE:
+                                artifact_warnings.append(PipelineWarning(
+                                    code="OPTIONAL_ARTIFACT_STORAGE_FAILURE",
+                                    message="The attention visualization could not be saved.",
+                                    component="artifact_storage",
+                                    severity=WarningSeverity.WARNING,
+                                ))
+                        except (ValueError, TypeError, OSError) as exc:
+                            logger.warning(
+                                "inference_stage_unavailable stage=explainability error_type=%s",
+                                type(exc).__name__,
+                            )
+                            explanation = ExplainabilityResult(
+                                status="unavailable",
+                                method="dinov2_attention_rollout",
+                                description="Attribution could not be generated or saved.",
+                            )
+                        if explanation.status == "available":
+                            norm_attn = np.clip(attention, 0.0, 1.0)
+                            resized_attn = np.asarray(Image.fromarray((norm_attn * 255).astype(np.uint8)).resize(
+                                (crop.shape[1], crop.shape[0]), Image.Resampling.BILINEAR
+                            ))
+                            colored_attn = self._apply_colormap(resized_attn)
+                            attn_overlay = (0.5 * crop + 0.5 * colored_attn).astype(np.uint8)
+                            try:
+                                attn_overlay_asset = self._persist_rgb_image(
+                                    attn_overlay,
+                                    scan_id,
+                                    f"leaf_{idx}_attention_overlay.png",
+                                )
+                            except InferenceError as exc:
+                                if exc.code != InferenceErrorCode.ARTIFACT_STORAGE_FAILURE:
+                                    raise
+                                logger.warning(
+                                    "inference_stage_unavailable stage=attention_overlay error_code=%s",
+                                    exc.code.value,
+                                )
+                                artifact_warnings.append(PipelineWarning(
+                                    code="OPTIONAL_ARTIFACT_STORAGE_FAILURE",
+                                    message="The attention overlay could not be saved.",
+                                    component="artifact_storage",
+                                    severity=WarningSeverity.WARNING,
+                                ))
                     else:
-                        explanation = ExplainabilityResult(status="unavailable", method="dinov2_gradient_weighted_attention",
+                        explanation = ExplainabilityResult(status="unavailable", method="dinov2_attention_rollout",
                                                            description="Classifier adapter did not provide an attribution map.")
+
+                    # Evaluate class-conditional Mahalanobis OOD
+                    ood_started = time.perf_counter()
+                    try:
+                        ood_result = OODDetector().evaluate_features(
+                            features,
+                            prediction.class_index,
+                            confidence=prediction.confidence,
+                        )
+                    except (ValueError, TypeError, OSError) as exc:
+                        logger.warning(
+                            "OOD evaluation unavailable error_type=%s",
+                            type(exc).__name__,
+                        )
+                        ood_result = OODResult(
+                            score=0.0,
+                            threshold=0.0,
+                            is_ood=False,
+                            method="ood_unavailable",
+                            status="ood_unavailable",
+                            classification_confidence=prediction.confidence,
+                            calibration_status="ood_unavailable",
+                        )
+                    timings["ood_detection"] = timings.get("ood_detection", 0) + self._elapsed(ood_started)
+
                     leaf_warnings: list[PipelineWarning] = [PipelineWarning(
                         code="RELIABILITY_UNCALIBRATED",
-                        message=f"Classification confidence is {classification.confidence:.3f}; provisional normalized entropy is {uncertainty.score:.3f} (threshold {uncertainty.threshold:.3f}). No calibrated OOD decision is available.",
+                        message=f"Classification confidence is {classification.confidence:.3f}; provisional normalized entropy is {uncertainty.score:.3f} (threshold {uncertainty.threshold:.3f}).",
                         component="reliability",
                         severity=WarningSeverity.WARNING,
                     ), PipelineWarning(
@@ -328,6 +419,7 @@ class PlantAnalysisService:
                         component="severity",
                         severity=WarningSeverity.WARNING,
                     )]
+                    leaf_warnings.extend(artifact_warnings)
                     if classification.confidence < OODDetector.DEFAULT_MIN_CONFIDENCE:
                         leaf_warnings.append(PipelineWarning(
                             code="LOW_CLASSIFICATION_CONFIDENCE",
@@ -337,19 +429,28 @@ class PlantAnalysisService:
                     if uncertainty.is_high_uncertainty:
                         leaf_warnings.append(PipelineWarning(
                             code="HIGH_PREDICTION_UNCERTAINTY",
-                            message="The classifier output is diffuse. Unsupported crop or disease inputs may contribute, but this provisional signal is not a validated OOD detector.",
+                            message="The classifier output is diffuse across classes. Prediction may be ambiguous.",
+                            component="reliability", severity=WarningSeverity.WARNING,
+                        ))
+                    if ood_result.status == "ood_unvalidated" and ood_result.is_ood:
+                        leaf_warnings.append(PipelineWarning(
+                            code="OOD_THRESHOLD_EXCEEDED_UNVALIDATED",
+                            message=f"The unvalidated Mahalanobis threshold was exceeded (distance {ood_result.score:.1f} > threshold {ood_result.threshold:.1f}); this is not a validated OOD diagnosis.",
                             component="reliability", severity=WarningSeverity.WARNING,
                         ))
                     segmented.append(SingleLeafAnalysis(
                         leaf_id=idx,
                         bounding_box=list(bbox),
                         leaf_mask_asset=leaf_asset,
+                        leaf_crop_asset=crop_asset,
+                        lesion_overlay_asset=lesion_overlay_asset,
+                        attention_overlay_asset=attn_overlay_asset,
                         is_leaf=True,
                         leaf_filter_confidence=leaf_confidence,
                         candidate_score=candidate.sam_score,
                         candidate_source=candidate.model_variant,
                         classification=classification,
-                        ood=None,
+                        ood=ood_result,
                         segmentation=seg_result,
                         severity=severity,
                         explainability=explanation,
@@ -609,6 +710,32 @@ class PlantAnalysisService:
             raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT, "SAM2 candidate mask is empty in its crop", stage="sam2")
         return crop, leaf_mask, (y0, x0, y1, x1)
 
+    def _persist_rgb_image(self, image: np.ndarray, scan_id: str, name: str) -> MaskAsset | None:
+        if self.storage is None:
+            return None
+        arr = np.asarray(image, dtype=np.uint8)
+        buffer = io.BytesIO()
+        Image.fromarray(arr, mode="RGB").save(buffer, format="PNG", optimize=True)
+        payload = buffer.getvalue()
+        key = f"analyses/{scan_id}/masks/{name}"
+        self._put_artifact(
+            payload,
+            key,
+            metadata={"width": str(arr.shape[1]), "height": str(arr.shape[0])},
+        )
+        return MaskAsset(storage_key=key, content_type="image/png", width=arr.shape[1],
+                         height=arr.shape[0], byte_size=len(payload))
+
+    @staticmethod
+    def _apply_colormap(gray: np.ndarray) -> np.ndarray:
+        """Apply a JET-like colormap to a 2D uint8 array without OpenCV dependency."""
+        norm = gray.astype(np.float32) / 255.0
+        r = np.clip(1.5 - np.abs(4.0 * norm - 3.0), 0.0, 1.0)
+        g = np.clip(1.5 - np.abs(4.0 * norm - 2.0), 0.0, 1.0)
+        b = np.clip(1.5 - np.abs(4.0 * norm - 1.0), 0.0, 1.0)
+        rgb = np.stack([r, g, b], axis=-1)
+        return (rgb * 255).astype(np.uint8)
+
     def _persist_mask(self, mask: np.ndarray, scan_id: str, name: str) -> MaskAsset | None:
         if self.storage is None:
             return None
@@ -617,8 +744,11 @@ class PlantAnalysisService:
         Image.fromarray(out, mode="L").save(buffer, format="PNG", optimize=True)
         payload = buffer.getvalue()
         key = f"analyses/{scan_id}/masks/{name}"
-        self.storage.put(payload, object_key=key, content_type="image/png",
-                         metadata={"width": str(out.shape[1]), "height": str(out.shape[0])})
+        self._put_artifact(
+            payload,
+            key,
+            metadata={"width": str(out.shape[1]), "height": str(out.shape[0])},
+        )
         return MaskAsset(storage_key=key, content_type="image/png", width=out.shape[1],
                          height=out.shape[0], byte_size=len(payload))
 
@@ -633,10 +763,40 @@ class PlantAnalysisService:
         Image.fromarray(gray, mode="L").save(buffer, format="PNG", optimize=True)
         payload = buffer.getvalue()
         key = f"analyses/{scan_id}/masks/{name}"
-        self.storage.put(payload, object_key=key, content_type="image/png",
-                         metadata={"width": str(gray.shape[1]), "height": str(gray.shape[0])})
+        self._put_artifact(
+            payload,
+            key,
+            metadata={"width": str(gray.shape[1]), "height": str(gray.shape[0])},
+        )
         return MaskAsset(storage_key=key, content_type="image/png", width=gray.shape[1],
                          height=gray.shape[0], byte_size=len(payload))
+
+    def _put_artifact(self, payload: bytes, key: str, *, metadata: dict[str, str]) -> None:
+        if self.storage is None:
+            raise InferenceError(
+                InferenceErrorCode.ARTIFACT_STORAGE_FAILURE,
+                "Analysis artifacts could not be saved",
+                stage="artifact_storage",
+            )
+        try:
+            stored_key = self.storage.put(
+                payload,
+                object_key=key,
+                content_type="image/png",
+                metadata=metadata,
+            )
+        except StorageError as exc:
+            raise InferenceError(
+                InferenceErrorCode.ARTIFACT_STORAGE_FAILURE,
+                "Analysis artifacts could not be saved",
+                stage="artifact_storage",
+            ) from exc
+        if stored_key != key:
+            raise InferenceError(
+                InferenceErrorCode.ARTIFACT_STORAGE_FAILURE,
+                "Storage returned an unexpected analysis artifact reference",
+                stage="artifact_storage",
+            )
 
     def _persist_attention(self, attention, shape: tuple[int, int], scan_id: str, index: int) -> ExplainabilityResult | None:
         values = np.asarray(attention, dtype=np.float32)
@@ -656,9 +816,9 @@ class PlantAnalysisService:
         asset = self._persist_grayscale(gray, scan_id, f"leaf_{index}_attribution.png")
         return ExplainabilityResult(
             status="available" if asset is not None else "unavailable",
-            method="dinov2_gradient_weighted_final_layer_attention",
+            method="dinov2_attention_rollout",
             heatmap_asset=asset,
-            description=("Class-specific gradient-weighted attention visualization resized to the leaf crop. It is not proof of causal reasoning; quality has not been evaluated."
+            description=("DINOv2 Attention Rollout across all 12 transformer encoder blocks resized to the leaf crop."
                          if asset is not None else "Attribution was computed but no storage backend is configured, so no heatmap is available to the caller."),
         )
 
@@ -672,12 +832,20 @@ class PlantAnalysisService:
                 breakdown[label] = breakdown.get(label, 0) + 1
         measured = [l.severity.affected_percentage for l in leaves
                     if l.severity and l.severity.status == "available" and l.severity.affected_percentage is not None]
-        avg_severity = float(np.mean(measured)) if measured else 0.0
-        # This is a descriptive score only; no agronomic meaning is claimed.
-        score = round(max(0.0, min(100.0, 100.0 - avg_severity)), 1)
+        avg_severity = float(np.mean(measured)) if measured else None
+        # Descriptive only: 100 minus mean measured severity, not a validated health metric.
+        score = (
+            round(max(0.0, min(100.0, 100.0 - avg_severity)), 1)
+            if avg_severity is not None
+            else None
+        )
         status = OverallHealthStatus.UNKNOWN
-        if leaves:
-            status = OverallHealthStatus.HEALTHY if healthy == len(leaves) else OverallHealthStatus.MILDLY_DISEASED
+        if leaves and avg_severity is not None:
+            status = (
+                OverallHealthStatus.HEALTHY
+                if healthy == len(leaves)
+                else OverallHealthStatus.MILDLY_DISEASED
+            )
         return PlantHealthSummary(
             overall_health_score=score,
             health_status=status,

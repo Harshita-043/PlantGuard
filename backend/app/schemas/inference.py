@@ -11,7 +11,7 @@ Design principles:
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -90,6 +90,12 @@ class OODResult(BaseModel):
     threshold: float = Field(..., description="Provisional configured decision boundary")
     is_ood: bool = Field(..., description="Provisional flag; not a validated OOD decision")
     method: str = Field(default="entropy_threshold", description="Uncertainty summary method")
+    status: Literal[
+        "ood_detected",
+        "ood_not_detected",
+        "ood_unavailable",
+        "ood_unvalidated",
+    ] = "ood_unvalidated"
     classification_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     calibration_status: str = Field(default="incomplete", description="Calibration dataset has not been evaluated")
 
@@ -159,6 +165,9 @@ class SingleLeafAnalysis(BaseModel):
         description="Normalized bounding box of the leaf [ymin, xmin, ymax, xmax]"
     )
     leaf_mask_asset: Optional[MaskAsset] = Field(None, description="Stored instance mask for this leaf")
+    leaf_crop_asset: Optional[MaskAsset] = Field(None, description="Stored crop image for this leaf")
+    lesion_overlay_asset: Optional[MaskAsset] = Field(None, description="Stored lesion overlay on leaf crop")
+    attention_overlay_asset: Optional[MaskAsset] = Field(None, description="Stored attention overlay on leaf crop")
     is_leaf: bool = Field(default=True, description="Whether candidate passed the leaf filter")
     leaf_filter_confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence that candidate is a leaf")
     candidate_score: float = Field(default=0.0, ge=0.0, le=1.0, description="SAM proposal ranking score")
@@ -174,7 +183,7 @@ class SingleLeafAnalysis(BaseModel):
 
 class PlantHealthSummary(BaseModel):
     """High-level summary aggregated across all leaves in the scan."""
-    overall_health_score: float = Field(..., ge=0.0, le=100.0, description="Aggregate health score (0-100)")
+    overall_health_score: Optional[float] = Field(None, ge=0.0, le=100.0, description="Descriptive score derived from measured mask severity; null when unavailable")
     health_status: OverallHealthStatus = Field(..., description="Overall health state category")
     total_leaves_detected: int = Field(..., ge=0, description="Count of candidate leaves detected")
     valid_leaves_analyzed: int = Field(..., ge=0, description="Count of leaves passing leaf verification")
@@ -182,7 +191,7 @@ class PlantHealthSummary(BaseModel):
     diseased_leaves_count: int = Field(..., ge=0, description="Count of leaves assessed with disease")
     primary_diagnosis: Optional[str] = Field(None, description="Dominant disease diagnosed across the plant")
     disease_breakdown: Dict[str, int] = Field(default_factory=dict, description="Frequency count of diagnosed diseases")
-    average_severity_percentage: float = Field(..., ge=0.0, le=100.0, description="Mean leaf area affected across leaves")
+    average_severity_percentage: Optional[float] = Field(None, ge=0.0, le=100.0, description="Mean measured leaf area affected; null when masks are unavailable")
     recommendations: List[str] = Field(default_factory=list, description="Agronomic care and treatment guidance")
 
 

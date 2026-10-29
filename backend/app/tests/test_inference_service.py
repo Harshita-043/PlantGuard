@@ -99,10 +99,16 @@ def test_pipeline_order_contracts_and_timing():
     assert result.leaves[0].candidate_source == "test-sam"
     assert result.leaves[0].classification.primary_class == "Crop___class_3"
     assert result.leaves[0].segmentation.total_leaf_pixels > 0
-    assert set(result.stage_timings_ms) == {"leaf_candidate_generation", "leaf_filter", "classifier", "segmentation_and_severity"}
+    assert set(result.stage_timings_ms) == {
+        "leaf_candidate_generation",
+        "leaf_filter",
+        "classifier",
+        "ood_detection",
+        "segmentation_and_severity",
+    }
     assert result.sam_variant == "test-sam"
     assert result.sam_fallback_applied is False
-    assert result.leaves[0].explainability.method == "dinov2_gradient_weighted_final_layer_attention"
+    assert result.leaves[0].explainability.method == "dinov2_attention_rollout"
     assert result.leaves[0].prediction_uncertainty.calibration_status == "incomplete"
     assert result.plant_summary.recommendations == []
 

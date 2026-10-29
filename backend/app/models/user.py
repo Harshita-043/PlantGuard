@@ -1,12 +1,17 @@
 """Account identity and password hash used by authentication."""
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import DateTime, String, Uuid, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.analysis import Analysis
+    from app.models.plant import Plant
 
 
 class User(Base):
@@ -26,4 +31,7 @@ class User(Base):
     )
     analyses: Mapped[list["Analysis"]] = relationship(
         back_populates="user", passive_deletes="all"
+    )
+    plants: Mapped[list["Plant"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )

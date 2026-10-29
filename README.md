@@ -118,6 +118,14 @@ cd ..
 
 ## 💻 Running the Application
 
+### Persisted workflows and metric semantics
+
+- The authenticated dashboard reads user-scoped data from `GET /api/v1/dashboard/metrics`; it does not display sample metrics.
+- Plant records are stored through `/api/v1/plants`. Scans may be associated with an owned plant during upload, or linked later through the plant API.
+- Analysis history and artifact retrieval are owner-scoped. Object-storage buckets remain private; providers use short-lived signed downloads, while local storage is served through the authenticated API.
+- The displayed health score is descriptive only: `100 - mean measured per-leaf severity`. It is not a validated agronomic measurement and is unavailable when aligned severity masks are unavailable.
+- The OOD artifact records an in-distribution 99th-percentile threshold. OOD performance has not been independently validated, so those results remain explicitly unvalidated and must not be interpreted as confirmed OOD diagnoses.
+
 ### Running Locally
 
 1. **Start Backend**:

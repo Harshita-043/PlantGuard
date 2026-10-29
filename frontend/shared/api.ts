@@ -53,6 +53,7 @@ export interface PlantAnalysisResponse {
 /** Persisted image lifecycle metadata; it contains no inferred plant results. */
 export interface AnalysisLifecycleResponse {
   analysis_id: string;
+  plant_id: string | null;
   status: "pending" | "completed" | "failed";
   created_at: string;
   image_content_type: string;
@@ -117,7 +118,7 @@ export interface FullScanResult {
 }
 
 export interface PlantHealthSummaryV2 {
-  overall_health_score: number;
+  overall_health_score: number | null;
   health_status:
     "healthy" | "mildly_diseased" | "severely_diseased" | "unknown";
   total_leaves_detected: number;
@@ -126,7 +127,7 @@ export interface PlantHealthSummaryV2 {
   diseased_leaves_count: number;
   primary_diagnosis: string | null;
   disease_breakdown: Record<string, number>;
-  average_severity_percentage: number;
+  average_severity_percentage: number | null;
   recommendations: string[];
 }
 
@@ -138,6 +139,9 @@ export interface SingleLeafAnalysis {
   candidate_score: number;
   candidate_source: string;
   leaf_mask_asset: MaskAsset | null;
+  leaf_crop_asset: MaskAsset | null;
+  lesion_overlay_asset: MaskAsset | null;
+  attention_overlay_asset: MaskAsset | null;
   classification: {
     primary_class: string;
     confidence: number;
@@ -151,6 +155,11 @@ export interface SingleLeafAnalysis {
     threshold: number;
     is_ood: boolean;
     method: string;
+    status:
+      | "ood_detected"
+      | "ood_not_detected"
+      | "ood_unavailable"
+      | "ood_unvalidated";
     calibration_status: string;
   } | null;
   segmentation: {
@@ -195,6 +204,49 @@ export interface AuthUserResponse {
   email: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface HealthTrendPoint {
+  analysis_id: string;
+  timestamp: string;
+  health_score: number;
+  health_status: string;
+  severity_percentage: number | null;
+}
+
+export interface DashboardMetricsResponse {
+  total_analyses: number;
+  healthy_analyses: number;
+  diseased_analyses: number;
+  inconclusive_analyses: number;
+  failed_analyses: number;
+  total_plants: number;
+  average_health_score: number | null;
+  disease_distribution: Record<string, number>;
+  recent_scans: AnalysisLifecycleResponse[];
+  health_trend: HealthTrendPoint[];
+}
+
+export interface PlantPayload {
+  name: string;
+  species: string | null;
+  location: string | null;
+  notes: string | null;
+}
+
+export interface PlantResponse extends PlantPayload {
+  id: string;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
+  total_scans: number;
+  health_status: string | null;
+  latest_analysis: AnalysisLifecycleResponse | null;
+}
+
+export interface PlantDetailResponse extends PlantResponse {
+  recent_scans: AnalysisLifecycleResponse[];
+  health_trend: HealthTrendPoint[];
 }
 
 export interface RegisterRequest {

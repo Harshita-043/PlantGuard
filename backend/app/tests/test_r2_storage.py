@@ -112,6 +112,35 @@ def test_factory_selects_r2_with_explicit_configuration():
     assert isinstance(adapter, CloudflareR2ObjectStorage)
 
 
+def test_r2_client_uses_sigv4_and_preserves_presigned_get_compatibility(monkeypatch):
+    signed_adapter, _ = _adapter()
+    captured = {}
+
+    def fake_client(service, **kwargs):
+        captured["service"] = service
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("app.storage.r2.boto3.client", fake_client)
+    adapter = CloudflareR2ObjectStorage(
+        endpoint_url=_ENDPOINT,
+        bucket_name=_BUCKET,
+        access_key_id=_ACCESS_KEY,
+        secret_access_key=_SECRET_KEY,
+    )
+
+    assert adapter is not None
+    assert captured["service"] == "s3"
+    assert captured["config"].signature_version == "s3v4"
+    assert captured["region_name"] == "auto"
+    assert captured["endpoint_url"] == _ENDPOINT
+
+    signed_url = signed_adapter.create_download_url("plants/leaf.png")
+    assert "X-Amz-Algorithm=AWS4-HMAC-SHA256" in signed_url
+    assert "X-Amz-Expires=300" in signed_url
+    assert "plantguard/plants/leaf.png" in signed_url
+
+
 def test_secret_configuration_is_redacted_in_settings_representation():
     configuration = Settings(
         _env_file=None,

@@ -48,6 +48,49 @@ def test_severity_empty_leaf_is_explicitly_unavailable():
     assert result.affected_percentage is None
 
 
+def test_severity_categories_use_unrounded_area_and_do_not_erase_tiny_lesions():
+    leaf = np.ones((100, 1000), dtype=np.uint8)
+    disease = np.zeros_like(leaf)
+    disease.flat[:15004] = 1
+    boundary = SeverityEstimator.estimate_severity(disease, leaf)
+    assert boundary.affected_percentage == 15.0
+    assert boundary.level == SeverityLevel.MEDIUM
+
+    tiny = np.zeros_like(leaf)
+    tiny[0, 0] = 1
+    result = SeverityEstimator.estimate_severity(tiny, leaf)
+    assert result.affected_percentage == 0.0
+    assert result.level == SeverityLevel.LOW
+    assert result.score > 0
+
+
+def test_missing_severity_is_not_aggregated_as_healthy():
+    from app.ml.service import PlantAnalysisService
+    from app.schemas.inference import ClassificationResult, SeverityResult, SingleLeafAnalysis
+
+    leaf = SingleLeafAnalysis(
+        leaf_id=0,
+        bounding_box=[0.0, 0.0, 1.0, 1.0],
+        leaf_filter_confidence=0.9,
+        classification=ClassificationResult(
+            primary_class="Tomato___healthy",
+            confidence=0.9,
+            is_healthy=True,
+        ),
+        severity=SeverityResult(
+            status="unavailable",
+            method="unavailable",
+            assessment="Missing aligned masks",
+        ),
+    )
+
+    summary = PlantAnalysisService._summary([leaf])
+
+    assert summary.overall_health_score is None
+    assert summary.average_severity_percentage is None
+    assert summary.health_status.value == "unknown"
+
+
 def test_severity_requires_aligned_two_dimensional_masks():
     misaligned = SeverityEstimator.estimate_severity(np.zeros((4, 4)), np.zeros((3, 4)))
     assert misaligned.status == "unavailable"
@@ -76,6 +119,7 @@ def test_explanation_resizes_to_exact_leaf_crop_and_reports_method():
         def put(self, payload, **kwargs):
             self.payload = payload
             self.kwargs = kwargs
+            return kwargs["object_key"]
 
     service = object.__new__(PlantAnalysisService)
     service.storage = CaptureStorage()
@@ -83,7 +127,7 @@ def test_explanation_resizes_to_exact_leaf_crop_and_reports_method():
     values[20:50, 30:70] = 1
     result = service._persist_attention(values, (61, 83), "test", 0)
     assert result.status == "available"
-    assert result.method == "dinov2_gradient_weighted_final_layer_attention"
+    assert result.method == "dinov2_attention_rollout"
     assert (result.heatmap_asset.height, result.heatmap_asset.width) == (61, 83)
     with Image.open(io.BytesIO(service.storage.payload)) as image:
         assert image.size == (83, 61)
@@ -96,6 +140,25 @@ def test_explanation_without_storage_is_typed_unavailable():
     result = service._persist_attention(np.ones((224, 224), dtype=np.float32), (64, 64), "test", 0)
     assert result.status == "unavailable"
     assert result.heatmap_asset is None
+
+
+def test_artifact_storage_failures_do_not_return_a_saved_asset_reference():
+    from app.ml.errors import InferenceError, InferenceErrorCode
+    from app.storage.errors import StorageError
+
+    class BrokenStorage:
+        def put(self, *_args, **_kwargs):
+            raise StorageError("provider details must not escape")
+
+    service = object.__new__(PlantAnalysisService)
+    service.storage = BrokenStorage()
+
+    with pytest.raises(InferenceError) as error:
+        service._persist_mask(np.ones((8, 8), dtype=np.uint8), "scan", "mask.png")
+
+    assert error.value.code == InferenceErrorCode.ARTIFACT_STORAGE_FAILURE
+    assert error.value.stage == "artifact_storage"
+    assert "provider details" not in str(error.value)
 
 
 @pytest.mark.parametrize("values", [np.ones((16, 16)), np.full((224, 224), np.nan), -np.ones((224, 224))])

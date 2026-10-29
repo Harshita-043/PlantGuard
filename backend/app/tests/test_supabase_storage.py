@@ -115,6 +115,36 @@ def test_factory_selects_supabase_with_complete_configuration():
     assert isinstance(storage, SupabaseStorageAdapter)
 
 
+def test_supabase_client_uses_sigv4_path_style_and_presigned_get(monkeypatch):
+    signed_adapter, _ = _adapter()
+    captured = {}
+
+    def fake_client(service, **kwargs):
+        captured["service"] = service
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("app.storage.supabase.boto3.client", fake_client)
+    adapter = SupabaseStorageAdapter(
+        endpoint_url=_ENDPOINT,
+        region=_REGION,
+        bucket_name=_BUCKET,
+        access_key_id=_ACCESS_KEY,
+        secret_access_key=_SECRET_KEY,
+    )
+
+    assert adapter is not None
+    assert captured["service"] == "s3"
+    assert captured["config"].signature_version == "s3v4"
+    assert captured["config"].s3["addressing_style"] == "path"
+    assert captured["region_name"] == _REGION
+
+    signed_url = signed_adapter.create_download_url("plants/leaf.png")
+    assert "X-Amz-Algorithm=AWS4-HMAC-SHA256" in signed_url
+    assert "X-Amz-Expires=300" in signed_url
+    assert "plantguard/plants/leaf.png" in signed_url
+
+
 def test_supabase_credentials_are_redacted_from_settings_representation():
     settings = _configuration()
     assert _ACCESS_KEY not in repr(settings)

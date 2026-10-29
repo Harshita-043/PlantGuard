@@ -5,11 +5,11 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from app.core.database import Base
-from app.models import Analysis, User
+from app.models import Analysis, Plant, User
 
 
 def test_database_model_metadata_has_only_justified_tables():
-    assert set(Base.metadata.tables) == {"analyses", "users"}
+    assert set(Base.metadata.tables) == {"analyses", "plants", "users"}
     table = Analysis.__table__
     required_columns = {
         "id",
@@ -36,6 +36,12 @@ def test_database_model_metadata_has_only_justified_tables():
     assert not table.c.user_id.nullable
     assert Analysis.user.property.back_populates == "analyses"
     assert User.analyses.property.back_populates == "user"
+    assert Analysis.plant.property.back_populates == "analyses"
+    assert Plant.analyses.property.back_populates == "plant"
+    assert Plant.user.property.back_populates == "plants"
+    assert {"id", "user_id", "name", "species", "location", "notes"} <= set(
+        Plant.__table__.columns.keys()
+    )
 
 
 def test_analysis_ids_and_result_use_postgresql_types():

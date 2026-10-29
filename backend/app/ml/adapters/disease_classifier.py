@@ -187,32 +187,100 @@ class DinoDiseaseClassifierAdapter(BaseModelAdapter):
 
         raise RuntimeError(f"Model {self.name} is not loaded and failure behavior is {self.failure_behavior}")
 
-    def predict_with_attention(self, preprocessed_input: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Return probabilities and class-specific gradient-weighted final-block attention.
-
-        This is a transformer-compatible visualization, not a causal explanation.
-        Its quality has not been evaluated on PlantVillage or PlantSeg data.
-        """
+    def predict_with_attention(
+        self,
+        preprocessed_input: np.ndarray,
+        return_features: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray] | Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return probabilities and residual-aware rollout across every backbone block."""
         if not self.is_ready() or self._model is None:
             raise RuntimeError(f"Model {self.name} is not loaded")
         import torch
-        tensor_in = torch.from_numpy(preprocessed_input).to(self.active_device)
-        with torch.enable_grad():
-            logits, attention = self._model(tensor_in, return_attention=True)
-            if (attention is None or attention.ndim != 4 or attention.shape[-2:] != (257, 257)
-                    or logits.shape != (1, 38)):
-                raise ValueError("DINOv2 attention/logit output violates the ViT-B/14 224px contract")
-            target = logits[0].argmax()
-            gradient = torch.autograd.grad(logits[0, target], attention, retain_graph=False)[0]
-            relevance = torch.relu((gradient[:, :, 0, 1:] * attention[:, :, 0, 1:]).mean(dim=1))
-            relevance = relevance.reshape(1, 1, 16, 16)
-            relevance = torch.nn.functional.interpolate(
-                relevance, size=(224, 224), mode="bilinear", align_corners=False
+        values = np.asarray(preprocessed_input)
+        if (
+            values.shape != (1, 3, 224, 224)
+            or not np.issubdtype(values.dtype, np.floating)
+            or not np.isfinite(values).all()
+        ):
+            raise ValueError("Attention rollout input must be finite float32 with shape (1, 3, 224, 224)")
+
+        backbone = getattr(self._model, "backbone", None)
+        blocks = getattr(backbone, "blocks", None)
+        patch_size = getattr(backbone, "patch_size", None)
+        if not blocks or not isinstance(patch_size, int) or patch_size <= 0:
+            raise ValueError("Loaded classifier does not expose a supported DINOv2 transformer backbone")
+        input_height, input_width = values.shape[-2:]
+        if input_height % patch_size or input_width % patch_size:
+            raise ValueError("Classifier input dimensions are not divisible by the DINOv2 patch size")
+        grid_height = input_height // patch_size
+        grid_width = input_width // patch_size
+        expected_tokens = grid_height * grid_width + 1
+        first_attention = getattr(blocks[0], "attn", None)
+        head_count = getattr(first_attention, "num_heads", None)
+        if not isinstance(head_count, int) or head_count <= 0:
+            raise ValueError("Loaded DINOv2 attention block does not expose a valid head count")
+
+        tensor_in = torch.from_numpy(values.astype(np.float32, copy=False)).to(self.active_device)
+        with torch.inference_mode():
+            logits, all_attns, feat = self._model(
+                tensor_in, return_all_attentions=True, return_features=True
+            )
+            if (
+                not isinstance(all_attns, (list, tuple))
+                or len(all_attns) != len(blocks)
+                or logits.shape != (1, 38)
+                or feat.shape != (1, 768)
+                or not torch.isfinite(logits).all()
+                or not torch.isfinite(feat).all()
+            ):
+                raise ValueError("DINOv2 output does not match the loaded classifier architecture")
+
+            rollout = None
+            eye = torch.eye(expected_tokens, device=tensor_in.device)
+            for attn in all_attns:
+                if (
+                    not isinstance(attn, torch.Tensor)
+                    or attn.shape != (1, head_count, expected_tokens, expected_tokens)
+                    or not torch.isfinite(attn).all()
+                    or torch.any(attn < 0)
+                ):
+                    raise ValueError("DINOv2 block returned invalid attention tensors")
+                mean_head = attn[0].mean(dim=0)
+                residual_attention = mean_head + eye
+                row_sums = residual_attention.sum(dim=-1, keepdim=True)
+                if not torch.isfinite(row_sums).all() or torch.any(row_sums <= 0):
+                    raise ValueError("DINOv2 attention rollout has invalid row sums")
+                a_l = residual_attention / row_sums
+                if rollout is None:
+                    rollout = a_l
+                else:
+                    rollout = a_l @ rollout
+
+            if rollout is None:
+                raise ValueError("DINOv2 classifier returned no attention layers")
+            cls_attn = rollout[0, 1:].reshape(1, 1, grid_height, grid_width)
+            c_min, c_max = cls_attn.min(), cls_attn.max()
+            if c_max > c_min:
+                cls_attn = (cls_attn - c_min) / (c_max - c_min)
+            else:
+                cls_attn = torch.zeros_like(cls_attn)
+
+            interpolated = torch.nn.functional.interpolate(
+                cls_attn,
+                size=(input_height, input_width),
+                mode="bilinear",
+                align_corners=False,
             )[0, 0]
-            if not torch.isfinite(relevance).all():
-                raise ValueError("DINOv2 attribution contains non-finite values")
-            probabilities = torch.softmax(logits, dim=-1).detach().cpu().numpy()
-            attention_map = relevance.detach().cpu().numpy()
+
+            if not torch.isfinite(interpolated).all():
+                raise ValueError("DINOv2 attention rollout contains non-finite values")
+
+            probabilities = torch.softmax(logits, dim=-1).cpu().numpy()
+            attention_map = interpolated.cpu().numpy().astype(np.float32)
+            features = feat.cpu().numpy()[0]
+
+        if return_features:
+            return probabilities, attention_map, features
         return probabilities, attention_map
 
     def format_prediction(self, probabilities: np.ndarray, top_k: int = 5) -> Tuple[str, float, Dict[str, float], bool]:

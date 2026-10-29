@@ -13,6 +13,8 @@ from app.api import admin, scans, health, readiness
 from app.api.v1 import analyze
 from app.api.v1 import agentic
 from app.api.v1 import auth
+from app.api.v1 import plants
+from app.api.v1 import dashboard
 from app.core.config import settings
 
 # Configure logging
@@ -56,6 +58,8 @@ app.include_router(scans.router, prefix="/api", tags=["scans"])
 app.include_router(analyze.router, prefix="/api/v1", tags=["analysis"])
 app.include_router(agentic.router, prefix="/api/v1", tags=["agentic"])
 app.include_router(auth.router, prefix="/api/v1", tags=["authentication"])
+app.include_router(plants.router, prefix="/api/v1/plants", tags=["plants"])
+app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
 
 
 @app.get("/")

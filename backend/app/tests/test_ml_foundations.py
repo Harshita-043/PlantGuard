@@ -267,6 +267,8 @@ def test_pipeline_fails_closed_when_sam_config_is_missing():
     from app.ml.errors import InferenceErrorCode, ModelCapabilityError
 
     pipeline = PlantAnalysisPipeline()
+    pipeline.service.sam.config_name = "missing_sam2_config.yaml"
+    pipeline.service.mobile_sam.artifact_path = Path("missing_mobilesam.pt")
     img = Image.new("RGB", (128, 128), color=(45, 130, 45))
     buf = io.BytesIO()
     img.save(buf, format="PNG")

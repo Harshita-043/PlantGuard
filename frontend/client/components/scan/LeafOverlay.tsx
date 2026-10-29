@@ -1,153 +1,82 @@
-import { useState } from "react";
-import { Loader } from "lucide-react";
-import { LeafResult } from "@shared/api";
+import { useEffect, useState } from "react";
+
+export interface LeafVisualizationMode {
+  id: string;
+  label: string;
+  source: string | null;
+}
 
 interface LeafOverlayProps {
-  imageUrl: string;
-  leafResults: LeafResult[];
-  showDiseaseRegions: boolean;
-  showGradCAM: boolean;
+  leafId: number;
+  modes: LeafVisualizationMode[];
+  onImageError?: (source: string) => void;
 }
 
 export default function LeafOverlay({
-  imageUrl,
-  leafResults,
-  showDiseaseRegions = true,
-  showGradCAM = false,
+  leafId,
+  modes,
+  onImageError,
 }: LeafOverlayProps) {
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const [imageWidth, setImageWidth] = useState(0);
-  const [imageHeight, setImageHeight] = useState(0);
+  const [selectedMode, setSelectedMode] = useState(modes[0]?.id ?? "");
+  const [failedSource, setFailedSource] = useState<string | null>(null);
 
-  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    const img = e.target as HTMLImageElement;
-    setImageWidth(img.width);
-    setImageHeight(img.height);
-    setImageLoaded(true);
-  };
+  useEffect(() => {
+    if (!modes.some((mode) => mode.id === selectedMode)) {
+      setSelectedMode(modes[0]?.id ?? "");
+    }
+  }, [modes, selectedMode]);
 
-  const leafElements = leafResults.map((leaf, index) => {
-    // Convert normalized bounding box to pixel values
-    const left = leaf.bounding_box[0] * imageWidth + "px";
-    const top = leaf.bounding_box[1] * imageHeight + "px";
-    const width = leaf.bounding_box[2] * imageWidth + "px";
-    const height = leaf.bounding_box[3] * imageHeight + "px";
-
-    // Determine leaf color based on disease status
-    const isHealthy = leaf.disease_class === "healthy";
-    const leafColor = isHealthy
-      ? "hsl(var(--success))"
-      : leaf.disease_class.includes("spot") ||
-          leaf.disease_class.includes("mildew")
-        ? "hsl(var(--warning))"
-        : "hsl(var(--destructive))";
-
-    return (
-      <div
-        key={index}
-        className="absolute"
-        style={{ left, top, width, height, pointerEvents: "none" }}
-      >
-        {/* Leaf bounding box */}
-        <div className="absolute inset-0">
-          <div
-            className="border-2 border-dashed"
-            style={{ borderColor: leafColor }}
-          />
-        </div>
-
-        {/* Leaf number */}
-        <div className="absolute left-2 top-2">
-          <div
-            className="flex items-center justify-center w-6 h-6 rounded-full"
-            style={{
-              backgroundColor: leafColor,
-            }}
-          >
-            <span className="text-xs font-medium text-white">{index + 1}</span>
-          </div>
-        </div>
-
-        {/* Disease regions (if enabled and available) */}
-        {showDiseaseRegions && leaf.disease_mask && (
-          <div className="absolute inset-0" style={{ pointerEvents: "none" }}>
-            {/* In a real implementation, we would render the disease mask as a semi-transparent overlay */}
-            {/* For now, we'll show a simple indicator */}
-            {leaf.diseased_area_ratio > 0.1 && (
-              <div
-                className="absolute inset-0"
-                style={{
-                  backgroundColor: "hsl(var(--warning))",
-                  opacity: leaf.diseased_area_ratio * 0.3,
-                }}
-              />
-            )}
-          </div>
-        )}
-
-        {/* Grad-CAM visualization (if enabled and available) */}
-        {showGradCAM && leaf.explainability_heatmap && (
-          <div className="absolute inset-0" style={{ pointerEvents: "none" }}>
-            {/* In a real implementation, we would render the heatmap as a colored overlay */}
-            {/* For now, we'll show a simple indicator */}
-            <div
-              className="absolute inset-0"
-              style={{
-                backgroundColor: "hsl(var(--ai-accent))",
-                opacity: 0.2,
-              }}
-            />
-          </div>
-        )}
-      </div>
-    );
-  });
+  const selected = modes.find((mode) => mode.id === selectedMode);
+  const imageFailed = selected?.source === failedSource;
 
   return (
-    <div className="relative w-full h-96">
-      <img
-        src={imageUrl}
-        alt="Plant scan"
-        className="w-full h-full object-cover rounded-xl"
-        onLoad={handleImageLoad}
-      />
-      {!imageLoaded ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-muted/70">
-          <Loader size={24} className="mr-2 animate-spin" />
-          <p className="text-muted-foreground">Loading plant image...</p>
-        </div>
-      ) : (
-        imageWidth > 0 &&
-        imageHeight > 0 && (
-          <div className="absolute inset-0 pointer-events-none">
-            {leafElements}
-          </div>
-        )
-      )}
-      <div className="absolute bottom-4 left-4 space-x-2">
-        {/* Legend */}
-        <div className="flex items-center gap-2 text-xs">
-          <div
-            className="w-3 h-3 rounded border border-dashed"
-            style={{ borderColor: "hsl(var(--success))" }}
-          />
-          <span>Healthy</span>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <div
-            className="w-3 h-3 rounded border border-dashed"
-            style={{ borderColor: "hsl(var(--warning))" }}
-          />
-          <span>Warning</span>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <div
-            className="w-3 h-3 rounded border border-dashed"
-            style={{ borderColor: "hsl(var(--destructive))" }}
-          />
-          <span>Issue</span>
-        </div>
+    <section className="space-y-3" aria-label={`Visualizations for leaf ${leafId + 1}`}>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Visualization mode">
+        {modes.map((mode) => (
+          <button
+            key={mode.id}
+            type="button"
+            aria-pressed={selectedMode === mode.id}
+            onClick={() => setSelectedMode(mode.id)}
+            className={`rounded-lg border px-3 py-1.5 text-xs transition ${
+              selectedMode === mode.id
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-background text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {mode.label}
+          </button>
+        ))}
       </div>
-    </div>
+      <figure className="rounded-xl border border-border bg-muted/20 p-3">
+        <figcaption className="mb-2 text-sm font-medium">
+          {selected?.label ?? "Visualization"}
+        </figcaption>
+        {selected?.source && !imageFailed ? (
+          <img
+            key={selected.source}
+            src={selected.source}
+            alt={`${selected.label} for leaf ${leafId + 1}`}
+            onError={() => {
+              setFailedSource(selected.source);
+              onImageError?.(selected.source);
+            }}
+            className="max-h-[28rem] w-full rounded-lg object-contain"
+          />
+        ) : (
+          <p className="grid min-h-40 place-items-center rounded-lg border border-dashed border-border px-4 text-center text-sm text-muted-foreground" role="status">
+            {imageFailed
+              ? "This saved visualization could not be loaded."
+              : "This visualization was not generated or saved for this scan."}
+          </p>
+        )}
+      </figure>
+      {selected?.id.startsWith("attention") && (
+        <p className="text-xs text-muted-foreground">
+          Attention rollout shows model attention, not causal evidence for the
+          predicted class.
+        </p>
+      )}
+    </section>
   );
 }

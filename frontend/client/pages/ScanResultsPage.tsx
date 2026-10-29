@@ -10,6 +10,7 @@ import {
   ApiError,
   analysisApi,
 } from "@/lib/api";
+import LeafOverlay from "@/components/scan/LeafOverlay";
 
 export default function ScanResultsPage() {
   const { scanId } = useParams<{ scanId: string }>();
@@ -21,8 +22,10 @@ export default function ScanResultsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [assetError, setAssetError] = useState<string | null>(null);
+  const [isLoadingAssets, setIsLoadingAssets] = useState(false);
   const [assetLinks, setAssetLinks] = useState<AnalysisAssetLink[]>([]);
   const [assetSources, setAssetSources] = useState<Record<string, string>>({});
+  const [failedAssetKeys, setFailedAssetKeys] = useState<Set<string>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
@@ -66,6 +69,7 @@ export default function ScanResultsPage() {
     async function loadAssets() {
       if (!analysis || !accessToken) return;
       setAssetError(null);
+      setIsLoadingAssets(true);
       try {
         const response = await analysisApi.getAnalysisAssets(
           analysis.analysis_id,
@@ -73,21 +77,39 @@ export default function ScanResultsPage() {
         );
         const resolved = await Promise.all(
           response.assets.map(async (asset) => {
-            if (asset.download_url.startsWith("https://")) {
-              return [asset.storage_key, asset.download_url] as const;
+            try {
+              if (asset.download_url.startsWith("https://")) {
+                return { key: asset.storage_key, source: asset.download_url };
+              }
+              const blob = await analysisApi.getAssetBlob(
+                asset.download_url,
+                accessToken,
+              );
+              const source = URL.createObjectURL(blob);
+              objectUrls.push(source);
+              return { key: asset.storage_key, source };
+            } catch (caught) {
+              if (caught instanceof ApiError && caught.status === 401) {
+                throw caught;
+              }
+              return { key: asset.storage_key, source: null };
             }
-            const blob = await analysisApi.getAssetBlob(
-              asset.download_url,
-              accessToken,
-            );
-            const source = URL.createObjectURL(blob);
-            objectUrls.push(source);
-            return [asset.storage_key, source] as const;
           }),
         );
         if (active) {
           setAssetLinks(response.assets);
-          setAssetSources(Object.fromEntries(resolved));
+          setAssetSources(
+            Object.fromEntries(
+              resolved.flatMap(({ key, source }) =>
+                source ? [[key, source]] : [],
+              ),
+            ),
+          );
+          setFailedAssetKeys(
+            new Set(
+              resolved.filter(({ source }) => !source).map(({ key }) => key),
+            ),
+          );
         } else {
           objectUrls.forEach((url) => URL.revokeObjectURL(url));
         }
@@ -103,6 +125,8 @@ export default function ScanResultsPage() {
               ? caught.message
               : "Analysis images could not be loaded.",
           );
+      } finally {
+        if (active) setIsLoadingAssets(false);
       }
     }
     void loadAssets();
@@ -223,6 +247,11 @@ export default function ScanResultsPage() {
           {assetError}
         </p>
       )}
+      {isLoadingAssets && (
+        <p className="text-xs text-muted-foreground" role="status">
+          Loading saved image artifacts…
+        </p>
+      )}
       {assetLinks.find((asset) => asset.kind === "original") && (
         <figure className="rounded-xl border border-border p-4">
           <figcaption className="mb-3 text-sm font-medium">
@@ -235,15 +264,24 @@ export default function ScanResultsPage() {
             const source = original
               ? assetSources[original.storage_key]
               : undefined;
-            return source ? (
+            return source && !failedAssetKeys.has(original?.storage_key ?? "") ? (
               <img
                 src={source}
                 alt="Uploaded plant image"
                 className="max-h-96 w-full rounded-lg object-contain"
+                onError={() => {
+                  if (original) {
+                    setFailedAssetKeys((current) => new Set(current).add(original.storage_key));
+                  }
+                }}
               />
-            ) : (
+            ) : isLoadingAssets ? (
               <p className="text-xs text-muted-foreground">
                 Loading private image…
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground" role="status">
+                The original image could not be loaded.
               </p>
             );
           })()}
@@ -261,7 +299,9 @@ export default function ScanResultsPage() {
               <div>
                 <dt className="text-muted-foreground">Health score</dt>
                 <dd>
-                  {result.plant_summary.overall_health_score.toFixed(1)} / 100
+                  {result.plant_summary.overall_health_score === null
+                    ? "unavailable"
+                    : `${result.plant_summary.overall_health_score.toFixed(1)} / 100`}
                 </dd>
               </div>
               <div>
@@ -320,44 +360,69 @@ export default function ScanResultsPage() {
               )}
               {leaf.ood && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Provisional out-of-distribution warning:{" "}
-                  {leaf.ood.is_ood ? "flagged" : "not flagged"} (
-                  {leaf.ood.method}); this signal is not validated.
+                  {leaf.ood.status === "ood_unavailable"
+                    ? "Out-of-distribution status unavailable."
+                    : leaf.ood.method === "class_conditional_mahalanobis"
+                      ? `OOD status: ${leaf.ood.status.replace(/_/g, " ")}. The provisional Mahalanobis threshold was ${leaf.ood.is_ood ? "exceeded" : "not exceeded"}; OOD performance is not validated.`
+                      : `OOD evaluation is unvalidated (${leaf.ood.method}); no OOD determination is reported.`}
                 </p>
               )}
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                {[
-                  { label: "Leaf mask", asset: leaf.leaf_mask_asset },
-                  {
-                    label: "Lesion mask",
-                    asset: leaf.segmentation?.mask_asset ?? null,
-                  },
-                  {
-                    label: "Classifier attention",
-                    asset: leaf.explainability?.heatmap_asset ?? null,
-                  },
-                ].map(({ label, asset }) => {
-                  const source = asset
-                    ? assetSources[asset.storage_key]
-                    : undefined;
-                  if (!asset || !source) return null;
-                  return (
-                    <figure
-                      key={`${leaf.leaf_id}-${label}`}
-                      className="rounded-lg border border-border p-2"
-                    >
-                      <figcaption className="mb-2 text-xs text-muted-foreground">
-                        {label}
-                      </figcaption>
-                      <img
-                        src={source}
-                        alt={`${label} for leaf ${leaf.leaf_id + 1}`}
-                        loading="lazy"
-                        className="max-h-48 w-full rounded object-contain"
-                      />
-                    </figure>
-                  );
-                })}
+              <div className="mt-4">
+                <LeafOverlay
+                  leafId={leaf.leaf_id}
+                  modes={[
+                    {
+                      id: "crop",
+                      label: "Leaf crop",
+                      source: leaf.leaf_crop_asset
+                        ? assetSources[leaf.leaf_crop_asset.storage_key] ?? null
+                        : null,
+                    },
+                    {
+                      id: "leaf-mask",
+                      label: "Leaf mask",
+                      source: leaf.leaf_mask_asset
+                        ? assetSources[leaf.leaf_mask_asset.storage_key] ?? null
+                        : null,
+                    },
+                    {
+                      id: "lesion-mask",
+                      label: "Lesion mask",
+                      source: leaf.segmentation?.mask_asset
+                        ? assetSources[leaf.segmentation.mask_asset.storage_key] ?? null
+                        : null,
+                    },
+                    {
+                      id: "lesion-overlay",
+                      label: "Lesion overlay",
+                      source: leaf.lesion_overlay_asset
+                        ? assetSources[leaf.lesion_overlay_asset.storage_key] ?? null
+                        : null,
+                    },
+                    {
+                      id: "attention-rollout",
+                      label: "Attention rollout",
+                      source: leaf.explainability?.heatmap_asset
+                        ? assetSources[leaf.explainability.heatmap_asset.storage_key] ?? null
+                        : null,
+                    },
+                    {
+                      id: "attention-overlay",
+                      label: "Attention overlay",
+                      source: leaf.attention_overlay_asset
+                        ? assetSources[leaf.attention_overlay_asset.storage_key] ?? null
+                        : null,
+                    },
+                  ]}
+                  onImageError={(source) => {
+                    const failed = assetLinks.find(
+                      (asset) => assetSources[asset.storage_key] === source,
+                    );
+                    if (failed) {
+                      setFailedAssetKeys((current) => new Set(current).add(failed.storage_key));
+                    }
+                  }}
+                />
               </div>
               {leaf.warnings.map((warning, index) => (
                 <p
@@ -380,7 +445,8 @@ export default function ScanResultsPage() {
           <p className="text-xs text-muted-foreground">
             Uncertainty and severity are reported according to the stored model
             result; provisional signals are not calibrated clinical or agronomic
-            judgments.
+            judgments. The descriptive health score is 100 minus mean measured
+            leaf severity and is not a validated health measurement.
           </p>
         </div>
       )}

@@ -20,6 +20,7 @@ from app.api.v1.ownership import get_owned_analysis
 from app.core.database import get_db
 from app.core.config import settings
 from app.models.analysis import Analysis
+from app.models.plant import Plant
 from app.models.user import User
 from app.schemas.analysis_lifecycle import AnalysisAssetLink, AnalysisAssetsResponse, AnalysisLifecycleResponse
 from app.ml.errors import InferenceError
@@ -48,8 +49,14 @@ async def analyze_image(
     file: Annotated[UploadFile, File(...)],
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
+    plant_id: Annotated[UUID | None, Query()] = None,
 ) -> AnalysisLifecycleResponse:
     """Validate, privately store, run the configured real pipeline, and persist its result."""
+    if plant_id is not None:
+        plant = db.get(Plant, plant_id)
+        if plant is None or plant.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plant not found")
+
     try:
         image_content, content_type = await _read_validated_image(file)
     finally:
@@ -83,6 +90,7 @@ async def analyze_image(
     analysis = Analysis(
         id=analysis_id,
         user_id=current_user.id,
+        plant_id=plant_id,
         image_object_key=object_key,
         image_content_type=content_type,
         image_size_bytes=len(image_content),
@@ -136,6 +144,8 @@ async def analyze_image(
         public_message = (
             str(exc)
             if exc.stage == "variant_selection"
+            else "Analysis artifacts could not be saved"
+            if exc.code == "artifact_storage_failure"
             else "The configured model or runtime is unavailable"
             if exc.code in {
                 "missing_artifact", "unsupported_runtime", "artifact_integrity", "resource_limit"
@@ -419,6 +429,7 @@ def _analysis_object_keys(analysis: Analysis) -> list[str]:
 def _lifecycle_response(analysis: Analysis) -> AnalysisLifecycleResponse:
     return AnalysisLifecycleResponse(
         analysis_id=analysis.id,
+        plant_id=getattr(analysis, "plant_id", None),
         status=analysis.status,
         created_at=analysis.created_at,
         image_content_type=analysis.image_content_type,

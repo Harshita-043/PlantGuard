@@ -64,20 +64,21 @@ class SeverityEstimator:
         binary_disease = (disease_mask > 0) & valid_leaf
         diseased_pixels = int(np.count_nonzero(binary_disease))
         ratio = diseased_pixels / float(leaf_pixels)
-        affected_percentage = round(ratio * 100.0, 2)
+        exact_affected_percentage = ratio * 100.0
+        affected_percentage = round(exact_affected_percentage, 2)
 
         # Categorical rating
-        if diseased_pixels == 0 or affected_percentage == 0.0:
+        if diseased_pixels == 0:
             level = SeverityLevel.HEALTHY
             score = 0.0
             assessment = "No pathological lesions detected on the leaf surface."
             lesion_count = 0
-        elif affected_percentage <= cls.LOW_THRESHOLD_PCT:
+        elif exact_affected_percentage <= cls.LOW_THRESHOLD_PCT:
             level = SeverityLevel.LOW
             score = float(ratio)
             assessment = f"Mild infection detected affecting {affected_percentage}% of leaf area."
             lesion_count = cls._count_lesions(binary_disease)
-        elif affected_percentage <= cls.MEDIUM_THRESHOLD_PCT:
+        elif exact_affected_percentage <= cls.MEDIUM_THRESHOLD_PCT:
             level = SeverityLevel.MEDIUM
             score = float(ratio)
             assessment = f"Moderate infection detected affecting {affected_percentage}% of leaf area."
@@ -89,7 +90,7 @@ class SeverityEstimator:
             lesion_count = cls._count_lesions(binary_disease)
 
         return SeverityResult(
-            score=round(score, 4),
+            score=score,
             level=level,
             affected_percentage=affected_percentage,
             lesion_count=lesion_count,
