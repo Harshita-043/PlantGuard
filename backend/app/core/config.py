@@ -48,7 +48,16 @@ class Settings(BaseSettings):
     PLANTGUARD_DISEASE_CLASSIFIER_VARIANT: str = "onnx_fp32"
     PLANTGUARD_SEGFORMER_VARIANT: str = "onnx_int8"
 
-    model_config = SettingsConfigDict(case_sensitive=True, env_file=".env")
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        env_file=(
+            ".env",
+            "backend/.env",
+            str(Path(__file__).resolve().parent.parent.parent / ".env"),
+            str(Path(__file__).resolve().parent.parent.parent.parent / ".env"),
+        ),
+        extra="ignore",
+    )
 
 
 # Create settings instance
