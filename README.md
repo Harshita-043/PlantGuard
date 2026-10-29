@@ -56,6 +56,10 @@ Copy `.env.example` to `backend/.env` for local configuration:
 | `PLANTGUARD_DEVICE` | string | `auto` | Target device for ML inference (`auto`, `cpu`, `cuda`, `mps`). Auto prefers CUDA, then Apple MPS, then CPU. |
 | `PLANTGUARD_SAM_STRATEGY` | string | `auto` | Retained compatibility setting; proposals always try SAM 2 first, then MobileSAM if SAM 2 is unavailable. |
 | `PLANTGUARD_INFERENCE_PROFILE` | string | `auto` | Inference profile (`auto` for local discovery, `remote` for remote worker). |
+| `PLANTGUARD_LEAF_FILTER_VERSION` | string | `v2` | Selects the manifest-verified DINOv2 ViT-S/14 leaf-filter artifact. |
+| `PLANTGUARD_DISEASE_CLASSIFIER_VARIANT` | string | `original-pytorch-fp32` | Exact manifest variant for DINOv2 ViT-B/14 classification; unregistered variants fail explicitly. |
+| `PLANTGUARD_SEGFORMER_VARIANT` | string | `original-transformers-fp32` | Exact manifest variant for SegFormer-B0 PlantSeg. |
+| `PLANTGUARD_OOD_CALIBRATION_PATH` | path | repository calibration artifact | Optional path to the required OOD calibration NPZ; a matching JSON metadata file is required. |
 | `R2_BUCKET_NAME` | string | `""` | Bucket name when using Cloudflare R2 storage. |
 | `R2_ENDPOINT_URL` | string | `""` | S3 API endpoint URL for Cloudflare R2. |
 | `SUPABASE_STORAGE_BUCKET` | string | `""` | Bucket name when using Supabase Storage. |

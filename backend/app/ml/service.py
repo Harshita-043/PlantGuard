@@ -45,15 +45,18 @@ from app.ml.variants import MODEL_IDS, ModelVariantRegistry
 from app.ml.severity import SeverityEstimator
 from app.core.config import settings
 from app.schemas.inference import (
+    CandidateStageCounts,
     ClassificationResult,
     ExplainabilityResult,
     FullScanResult,
     MaskAsset,
     OverallHealthStatus,
+    PartialFailure,
     PipelineWarning,
     PlantHealthSummary,
     PredictionUncertainty,
     SegmentationResult,
+    SeverityResult,
     SeverityLevel,
     SingleLeafAnalysis,
     WarningSeverity,
@@ -86,6 +89,7 @@ class PlantAnalysisService:
         classifier=None,
         segmenter=None,
         storage: ObjectStorage | None = None,
+        ood_detector: OODDetector | None = None,
         device: str | None = None,
         timeout_seconds: float | None = None,
         candidate_limit: int | None = None,
@@ -102,6 +106,7 @@ class PlantAnalysisService:
         model_registry.register_adapter("leaf_instance_segmentation", self.sam)
         model_registry.register_adapter("mobile_sam_instance_segmentation", self.mobile_sam)
         self.storage = storage
+        self.ood_detector = ood_detector or OODDetector()
         self.device = device or device_manager.active_device
         configured_profile = settings.PLANTGUARD_INFERENCE_PROFILE
         if configured_profile == "cpu":
@@ -149,6 +154,7 @@ class PlantAnalysisService:
 
     def analyze(self, image: np.ndarray, *, analysis_id: str | None = None) -> FullScanResult:
         self._validate_image(image)
+        image = np.array(image, dtype=np.uint8, order="C", copy=True)
         if not self._inference_slot.acquire(timeout=self.timeout_seconds):
             raise InferenceTimeoutError()
 
@@ -186,6 +192,7 @@ class PlantAnalysisService:
                     if score.accepted:
                         accepted.append((candidate, crop, score))
             self._with_model(self.leaf_filter, "leaf_filter", filter_candidates)
+            self._candidate_counts["leaf_filter_accepted"] = len(accepted)
             timings["leaf_filter"] = self._elapsed(t0)
             logger.info("inference_stage_complete stage=leaf_filter candidates=%d accepted=%d runtime=%s model=%s duration_ms=%d",
                         len(candidates), len(accepted), self.device, self.leaf_filter.artifact_version, timings["leaf_filter"])
@@ -212,8 +219,11 @@ class PlantAnalysisService:
                                 probs, attention, features = res
                             else:
                                 probs, attention = res
-                        except Exception as exc:
-                            probs = adapter.predict(model_input)
+                        except (RuntimeError, TypeError, ValueError) as exc:
+                            if hasattr(adapter, "predict_with_features"):
+                                probs, features = adapter.predict_with_features(model_input)
+                            else:
+                                probs = adapter.predict(model_input)
                             logger.warning("inference_stage_unavailable stage=explainability runtime=%s model=%s error_code=explanation_unavailable error_type=%s",
                                            self.device, adapter.artifact_version, type(exc).__name__)
                     else:
@@ -230,6 +240,7 @@ class PlantAnalysisService:
                     )
                     predictions.append((accepted_item, prediction, attention, features))
             self._with_model(self.classifier, "classifier", classify)
+            self._candidate_counts["disease_analysis_eligible"] = len(predictions)
             timings["classifier"] = self._elapsed(t0)
             logger.info("inference_stage_complete stage=classifier leaves=%d runtime=%s model=%s duration_ms=%d",
                         len(predictions), self.device, self.classifier.artifact_version, timings["classifier"])
@@ -289,7 +300,7 @@ class PlantAnalysisService:
                         disease_name=disease_name.replace("_", " "),
                         top_k_probabilities=top_k,
                     )
-                    entropy_signal = OODDetector().evaluate_probabilities(probs[0])
+                    entropy_signal = self.ood_detector.evaluate_probabilities(probs[0])
                     uncertainty = PredictionUncertainty(
                         score=entropy_signal.score,
                         threshold=entropy_signal.threshold,
@@ -386,26 +397,11 @@ class PlantAnalysisService:
 
                     # Evaluate class-conditional Mahalanobis OOD
                     ood_started = time.perf_counter()
-                    try:
-                        ood_result = OODDetector().evaluate_features(
-                            features,
-                            prediction.class_index,
-                            confidence=prediction.confidence,
-                        )
-                    except (ValueError, TypeError, OSError) as exc:
-                        logger.warning(
-                            "OOD evaluation unavailable error_type=%s",
-                            type(exc).__name__,
-                        )
-                        ood_result = OODResult(
-                            score=0.0,
-                            threshold=0.0,
-                            is_ood=False,
-                            method="ood_unavailable",
-                            status="ood_unavailable",
-                            classification_confidence=prediction.confidence,
-                            calibration_status="ood_unavailable",
-                        )
+                    ood_result = self.ood_detector.evaluate_features(
+                        features,
+                        prediction.class_index,
+                        confidence=prediction.confidence,
+                    )
                     timings["ood_detection"] = timings.get("ood_detection", 0) + self._elapsed(ood_started)
 
                     leaf_warnings: list[PipelineWarning] = [PipelineWarning(
@@ -434,8 +430,8 @@ class PlantAnalysisService:
                         ))
                     if ood_result.status == "ood_unvalidated" and ood_result.is_ood:
                         leaf_warnings.append(PipelineWarning(
-                            code="OOD_THRESHOLD_EXCEEDED_UNVALIDATED",
-                            message=f"The unvalidated Mahalanobis threshold was exceeded (distance {ood_result.score:.1f} > threshold {ood_result.threshold:.1f}); this is not a validated OOD diagnosis.",
+                            code="OOD_ABSTENTION_UNVALIDATED",
+                            message=f"The unvalidated Mahalanobis threshold was exceeded (distance {ood_result.score:.1f} > threshold {ood_result.threshold:.1f}); the class prediction is withheld pending OOD validation.",
                             component="reliability", severity=WarningSeverity.WARNING,
                         ))
                     segmented.append(SingleLeafAnalysis(
@@ -449,7 +445,7 @@ class PlantAnalysisService:
                         leaf_filter_confidence=leaf_confidence,
                         candidate_score=candidate.sam_score,
                         candidate_source=candidate.model_variant,
-                        classification=classification,
+                        classification=None if ood_result.is_ood else classification,
                         ood=ood_result,
                         segmentation=seg_result,
                         severity=severity,
@@ -457,36 +453,65 @@ class PlantAnalysisService:
                         prediction_uncertainty=uncertainty,
                         warnings=leaf_warnings,
                     ))
-            self._with_model(self.segmenter, "segmentation", segment)
-            timings["segmentation_and_severity"] = self._elapsed(t0)
-            logger.info("inference_stage_complete stage=segmentation_and_severity leaves=%d runtime=%s model=%s duration_ms=%d",
-                        len(segmented), self.device, self.segmenter.artifact_version,
-                        timings["segmentation_and_severity"])
-            leaves = segmented
+            partial_failures: list[PartialFailure] = []
+            try:
+                self._with_model(self.segmenter, "segmentation", segment)
+            except InferenceError as exc:
+                if exc.code == InferenceErrorCode.ARTIFACT_STORAGE_FAILURE:
+                    raise
+                timings["segmentation_and_severity"] = self._elapsed(t0)
+                leaves = segmented + self._classification_only_results(
+                    predictions[len(segmented):],
+                    timings,
+                    start_index=len(segmented),
+                )
+                partial_failures.append(PartialFailure(
+                    component="disease_segmentation",
+                    error_type=exc.code.value,
+                    message="Disease segmentation was unavailable for one or more leaves; available classifications are preserved.",
+                    fallback_applied=True,
+                ))
+                warnings.append(PipelineWarning(
+                    code="DISEASE_SEGMENTATION_UNAVAILABLE",
+                    message="Disease segmentation or mask-derived severity is unavailable for one or more leaves.",
+                    component="disease_segmentation",
+                    severity=WarningSeverity.WARNING,
+                ))
+                logger.warning(
+                    "inference_stage_unavailable stage=segmentation error_code=%s runtime=%s",
+                    exc.code.value, self.device,
+                )
+            else:
+                timings["segmentation_and_severity"] = self._elapsed(t0)
+                logger.info("inference_stage_complete stage=segmentation_and_severity leaves=%d runtime=%s model=%s duration_ms=%d",
+                            len(segmented), self.device, self.segmenter.artifact_version,
+                            timings["segmentation_and_severity"])
+                leaves = segmented
             warnings.extend(w for leaf in leaves for w in leaf.warnings)
             summary = self._summary(leaves)
-            # Warnings describe uncalibrated or unavailable optional signals;
-            # they do not mean a required inference stage failed.
-            status = "completed"
+            status = "partial" if partial_failures else "completed"
+            model_versions = {
+                "leaf_proposals": candidate_output.metadata.model_version,
+                "dinov2_vits14": self.leaf_filter.artifact_version,
+                "dinov2_vitb14": self.classifier.artifact_version,
+            }
+            if not partial_failures:
+                model_versions["segformer_b0_plantseg"] = self.segmenter.artifact_version
             return FullScanResult(
                 analysis_id=scan_id,
                 status=status,
                 hardware_device=self.device,
                 processing_time_ms=self._elapsed(started),
-                model_versions={
-                    "leaf_proposals": candidate_output.metadata.model_version,
-                    "dinov2_vits14": self.leaf_filter.artifact_version,
-                    "dinov2_vitb14": self.classifier.artifact_version,
-                    "segformer_b0_plantseg": self.segmenter.artifact_version,
-                },
+                model_versions=model_versions,
                 sam_variant=self._selected_sam_adapter.artifact_version,
                 sam_fallback_applied=sam_fallback_applied,
                 stage_timings_ms=timings,
                 model_load_timings_ms=dict(self.model_load_timings_ms),
+                candidate_counts=CandidateStageCounts(**self._candidate_counts),
                 leaves=leaves,
                 plant_summary=summary,
                 warnings=warnings,
-                partial_failures=[],
+                partial_failures=partial_failures,
             )
         except InferenceError as exc:
             logger.error("inference_failed stage=%s error_code=%s runtime=%s duration_ms=%d",
@@ -503,9 +528,17 @@ class PlantAnalysisService:
     def _sam_candidates(self, image: np.ndarray, timings: dict[str, int]) -> StageOutput[tuple[LeafCandidate, ...]]:
         t0 = time.perf_counter()
         self._selected_sam_adapter = None
+        self._candidate_counts = {
+            "generated": 0,
+            "valid": 0,
+            "deduplicated": 0,
+            "leaf_filter_accepted": 0,
+            "disease_analysis_eligible": 0,
+        }
         failures: list[str] = []
         for adapter, stage in ((self.sam, "sam2"), (self.mobile_sam, "mobilesam")):
             raw_candidates: list[LeafCandidate] = []
+            generated_count = 0
             expected_method = (
                 "mobilesam.point_grid_predictor"
                 if adapter is self.mobile_sam
@@ -513,7 +546,14 @@ class PlantAnalysisService:
             )
 
             def generate(model_adapter):
-                for item in model_adapter.predict(image)[:self.candidate_limit]:
+                nonlocal generated_count
+                model_candidates = model_adapter.predict(image)
+                generated_count = getattr(
+                    model_adapter,
+                    "last_generated_candidate_count",
+                    len(model_candidates),
+                )
+                for item in model_candidates[:self.candidate_limit]:
                     mask = np.asarray(item.get("segmentation"))
                     if mask.shape != image.shape[:2] or mask.ndim != 2 or not np.isin(mask, [0, 1, False, True]).all():
                         raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
@@ -556,16 +596,26 @@ class PlantAnalysisService:
                 failures.append(f"{stage}: model returned no usable candidates")
                 continue
 
+            deduplicated = self._deduplicate_candidates(raw_candidates)
+            if not deduplicated:
+                failures.append(f"{stage}: no unique usable candidates remained")
+                continue
+            self._candidate_counts.update({
+                "generated": int(generated_count),
+                "valid": len(raw_candidates),
+                "deduplicated": len(deduplicated),
+            })
             self._selected_sam_adapter = adapter
             elapsed = self._elapsed(t0)
             timings["leaf_candidate_generation"] = elapsed
             if adapter is self.mobile_sam:
                 logger.warning("model_fallback_applied primary=sam2 selected=mobilesam reason=%s",
                                failures[0] if failures else "SAM 2 unavailable")
-            logger.info("inference_stage_complete stage=leaf_candidate_generation candidates=%d runtime=%s model=%s duration_ms=%d",
-                        len(raw_candidates), self.device, adapter.artifact_version, elapsed)
+            logger.info("inference_stage_complete stage=leaf_candidate_generation generated=%d valid=%d deduplicated=%d runtime=%s model=%s duration_ms=%d",
+                        generated_count, len(raw_candidates), len(deduplicated), self.device,
+                        adapter.artifact_version, elapsed)
             return StageOutput(
-                value=tuple(raw_candidates),
+                value=tuple(deduplicated),
                 metadata=StageMetadata(
                     stage="leaf_candidate_generation",
                     model_version=adapter.artifact_version,
@@ -628,12 +678,20 @@ class PlantAnalysisService:
                 memory_limit_gb=limit,
                 concurrency=settings.PLANTGUARD_MAX_CONCURRENCY,
             )
+        configured_variant = None
+        if adapter.name == "dino_leaf_filter":
+            configured_variant = settings.PLANTGUARD_LEAF_FILTER_VERSION
+        elif adapter.name == "dino_disease_classifier":
+            configured_variant = settings.PLANTGUARD_DISEASE_CLASSIFIER_VARIANT
+        elif adapter.name == "segformer_disease_segmentation":
+            configured_variant = settings.PLANTGUARD_SEGFORMER_VARIANT
         selection = self._variant_registry.select(
             adapter.name, profile=self.profile, capabilities=self._runtime_capabilities,
             memory_limit_gb=(settings.PLANTGUARD_CUDA_MEMORY_LIMIT_GB if self.profile == "cuda"
                              else settings.PLANTGUARD_CPU_MEMORY_LIMIT_GB),
             preference=self.variant_preference,
             concurrency=settings.PLANTGUARD_MAX_CONCURRENCY,
+            requested_variant=configured_variant,
         )
         if adapter.name == "segformer_disease_segmentation":
             preprocessing = selection.get("preprocessing_identity") or {}
@@ -709,6 +767,31 @@ class PlantAnalysisService:
         if not np.any(leaf_mask):
             raise InferenceError(InferenceErrorCode.INVALID_MODEL_OUTPUT, "SAM2 candidate mask is empty in its crop", stage="sam2")
         return crop, leaf_mask, (y0, x0, y1, x1)
+
+    @staticmethod
+    def _deduplicate_candidates(
+        candidates: list[LeafCandidate],
+        *,
+        overlap_threshold: float = 0.95,
+    ) -> list[LeafCandidate]:
+        ranked = sorted(candidates, key=lambda candidate: candidate.sam_score, reverse=True)
+        unique: list[LeafCandidate] = []
+        for candidate in ranked:
+            mask = candidate.mask.astype(bool, copy=False)
+            area = int(np.count_nonzero(mask))
+            if area == 0:
+                continue
+            duplicate = False
+            for existing in unique:
+                existing_mask = existing.mask.astype(bool, copy=False)
+                smaller_area = min(area, int(np.count_nonzero(existing_mask)))
+                overlap = int(np.count_nonzero(mask & existing_mask))
+                if smaller_area and overlap / smaller_area >= overlap_threshold:
+                    duplicate = True
+                    break
+            if not duplicate:
+                unique.append(candidate)
+        return unique
 
     def _persist_rgb_image(self, image: np.ndarray, scan_id: str, name: str) -> MaskAsset | None:
         if self.storage is None:
@@ -822,17 +905,105 @@ class PlantAnalysisService:
                          if asset is not None else "Attribution was computed but no storage backend is configured, so no heatmap is available to the caller."),
         )
 
+    def _classification_only_results(
+        self,
+        predictions,
+        timings: dict[str, int],
+        *,
+        start_index: int = 0,
+    ) -> list[SingleLeafAnalysis]:
+        class_map = self.classifier.get_class_mapping() or {}
+        results: list[SingleLeafAnalysis] = []
+        for idx, (accepted_item, prediction, _attention, features) in enumerate(
+            predictions, start=start_index
+        ):
+            candidate, _crop, filter_score = accepted_item
+            probabilities = np.asarray(prediction.probabilities, dtype=np.float32)
+            top_ids = np.argsort(probabilities)[::-1][:5]
+            top_k = {class_map[int(i)]: round(float(probabilities[i]), 4) for i in top_ids}
+            crop_name, _, disease_name = prediction.class_name.partition("___")
+            classification = ClassificationResult(
+                primary_class=prediction.class_name,
+                confidence=prediction.confidence,
+                is_healthy="healthy" in prediction.class_name.lower(),
+                crop_type=crop_name,
+                disease_name=disease_name.replace("_", " "),
+                top_k_probabilities=top_k,
+            )
+            entropy_signal = self.ood_detector.evaluate_probabilities(probabilities)
+            uncertainty = PredictionUncertainty(
+                score=entropy_signal.score,
+                threshold=entropy_signal.threshold,
+                is_high_uncertainty=entropy_signal.score > entropy_signal.threshold,
+                classification_confidence=classification.confidence,
+                method="normalized_shannon_entropy",
+                calibration_status="incomplete",
+            )
+            ood_started = time.perf_counter()
+            ood_result = self.ood_detector.evaluate_features(
+                features,
+                prediction.class_index,
+                confidence=prediction.confidence,
+            )
+            timings["ood_detection"] = timings.get("ood_detection", 0) + self._elapsed(ood_started)
+            leaf_warnings = [PipelineWarning(
+                code="DISEASE_SEGMENTATION_UNAVAILABLE",
+                message="Disease segmentation and mask-derived severity are unavailable for this leaf.",
+                component="disease_segmentation",
+                severity=WarningSeverity.WARNING,
+            )]
+            if ood_result.is_ood:
+                leaf_warnings.append(PipelineWarning(
+                    code="OOD_ABSTENTION_UNVALIDATED",
+                    message="The provisional OOD threshold was exceeded; the class prediction is withheld.",
+                    component="reliability",
+                    severity=WarningSeverity.WARNING,
+                ))
+            results.append(SingleLeafAnalysis(
+                leaf_id=idx,
+                bounding_box=list(candidate.bbox),
+                is_leaf=True,
+                leaf_filter_confidence=filter_score.confidence,
+                candidate_score=candidate.sam_score,
+                candidate_source=candidate.model_variant,
+                classification=None if ood_result.is_ood else classification,
+                ood=ood_result,
+                severity=SeverityResult(
+                    status="unavailable",
+                    method="unavailable",
+                    assessment="Disease segmentation did not complete; affected area and severity are unavailable.",
+                ),
+                explainability=ExplainabilityResult(
+                    status="unavailable",
+                    method="dinov2_attention_rollout",
+                    description="No explainability artifact is available for this partial result.",
+                ),
+                prediction_uncertainty=uncertainty,
+                warnings=leaf_warnings,
+            ))
+        return results
+
     @staticmethod
     def _summary(leaves: list[SingleLeafAnalysis]) -> PlantHealthSummary:
-        healthy = sum(1 for leaf in leaves if leaf.classification and leaf.classification.is_healthy)
+        classified_leaves = [
+            leaf for leaf in leaves
+            if leaf.classification is not None and not (leaf.ood and leaf.ood.is_ood)
+        ]
+        healthy = sum(1 for leaf in classified_leaves if leaf.classification and leaf.classification.is_healthy)
         breakdown: dict[str, int] = {}
-        for leaf in leaves:
+        for leaf in classified_leaves:
             if leaf.classification and not leaf.classification.is_healthy:
                 label = leaf.classification.disease_name or leaf.classification.primary_class
                 breakdown[label] = breakdown.get(label, 0) + 1
-        measured = [l.severity.affected_percentage for l in leaves
-                    if l.severity and l.severity.status == "available" and l.severity.affected_percentage is not None]
-        avg_severity = float(np.mean(measured)) if measured else None
+        measured = [
+            l.severity.affected_percentage for l in classified_leaves
+            if l.severity and l.severity.status == "available" and l.severity.affected_percentage is not None
+        ]
+        avg_severity = (
+            float(np.mean(measured))
+            if measured and len(measured) == len(classified_leaves)
+            else None
+        )
         # Descriptive only: 100 minus mean measured severity, not a validated health metric.
         score = (
             round(max(0.0, min(100.0, 100.0 - avg_severity)), 1)
@@ -840,7 +1011,7 @@ class PlantAnalysisService:
             else None
         )
         status = OverallHealthStatus.UNKNOWN
-        if leaves and avg_severity is not None:
+        if classified_leaves and avg_severity is not None:
             status = (
                 OverallHealthStatus.HEALTHY
                 if healthy == len(leaves)
@@ -850,10 +1021,10 @@ class PlantAnalysisService:
             overall_health_score=score,
             health_status=status,
             total_leaves_detected=len(leaves),
-            valid_leaves_analyzed=len(leaves),
+            valid_leaves_analyzed=len(classified_leaves),
             healthy_leaves_count=healthy,
-            diseased_leaves_count=len(leaves) - healthy,
-            primary_diagnosis=max(breakdown, key=breakdown.get) if breakdown else ("healthy" if leaves else None),
+            diseased_leaves_count=len(classified_leaves) - healthy,
+            primary_diagnosis=max(breakdown, key=breakdown.get) if breakdown else ("healthy" if classified_leaves else None),
             disease_breakdown=breakdown,
             average_severity_percentage=avg_severity,
             recommendations=[],

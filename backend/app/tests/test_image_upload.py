@@ -300,6 +300,20 @@ def test_storage_failure_does_not_create_analysis(lifecycle_client, monkeypatch)
         assert db.scalar(select(func.count()).select_from(Analysis)) == 0
 
 
+def test_unverified_storage_upload_is_removed_and_not_persisted(lifecycle_client, monkeypatch):
+    client, sessions, storage, _app, _temporary_root = lifecycle_client
+    _user_id, token = _create_account(client, "storage-unverified@example.com")
+    monkeypatch.setattr(storage, "exists", lambda _key: False)
+
+    response = _upload(client, token)
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Image storage is unavailable"}
+    with sessions() as db:
+        assert db.scalar(select(func.count()).select_from(Analysis)) == 0
+    assert list(storage._root.iterdir()) == []
+
+
 def test_database_failure_removes_stored_object(lifecycle_client):
     client, sessions, storage, test_app, _temporary_root = lifecycle_client
     _user_id, token = _create_account(client, "db-failure@example.com")

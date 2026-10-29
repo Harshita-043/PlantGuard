@@ -195,6 +195,15 @@ class PlantHealthSummary(BaseModel):
     recommendations: List[str] = Field(default_factory=list, description="Agronomic care and treatment guidance")
 
 
+class CandidateStageCounts(BaseModel):
+    """Observed candidate counts at each leaf-analysis boundary."""
+    generated: int = Field(default=0, ge=0)
+    valid: int = Field(default=0, ge=0)
+    deduplicated: int = Field(default=0, ge=0)
+    leaf_filter_accepted: int = Field(default=0, ge=0)
+    disease_analysis_eligible: int = Field(default=0, ge=0)
+
+
 # Backward-compatible alias
 AggregatedPlantHealth = PlantHealthSummary
 
@@ -221,6 +230,10 @@ class FullScanResult(BaseModel):
     )
     stage_timings_ms: Dict[str, int] = Field(default_factory=dict, description="Per-stage elapsed time in milliseconds")
     model_load_timings_ms: Dict[str, int] = Field(default_factory=dict, description="Lazy per-model checkpoint load time in milliseconds")
+    candidate_counts: CandidateStageCounts = Field(
+        default_factory=CandidateStageCounts,
+        description="Counts observed across leaf-candidate filtering and classification stages",
+    )
     leaves: List[SingleLeafAnalysis] = Field(default_factory=list, description="Individual leaf assessments")
     plant_summary: PlantHealthSummary = Field(..., description="Plant-level aggregated health summary")
     warnings: List[PipelineWarning] = Field(default_factory=list, description="Global pipeline warnings")

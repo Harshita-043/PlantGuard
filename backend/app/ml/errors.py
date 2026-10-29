@@ -10,6 +10,8 @@ class InferenceErrorCode(StrEnum):
     INVALID_MODEL_OUTPUT = "invalid_model_output"
     ARTIFACT_INTEGRITY = "artifact_integrity"
     INVALID_CONFIGURATION = "invalid_configuration"
+    OOD_CALIBRATION_UNAVAILABLE = "ood_calibration_unavailable"
+    OUT_OF_DISTRIBUTION = "out_of_distribution"
     ARTIFACT_STORAGE_FAILURE = "artifact_storage_failure"
     RESOURCE_LIMIT = "resource_limit"
     REMOTE_FAILURE = "remote_failure"

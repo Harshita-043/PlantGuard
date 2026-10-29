@@ -5,6 +5,7 @@ Prevents silent false-positive classifications on non-leaf images, background no
 or unseen disease types using statistical uncertainty estimation.
 """
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -12,6 +13,8 @@ from threading import RLock
 from typing import Dict, List, Optional, Tuple, TypedDict, Union
 import numpy as np
 
+from app.core.config import settings
+from app.ml.errors import InferenceError, InferenceErrorCode, ModelCapabilityError
 from app.schemas.inference import OODResult
 
 logger = logging.getLogger(__name__)
@@ -38,7 +41,7 @@ class OODDetector:
     DEFAULT_ENTROPY_THRESHOLD = float(os.getenv("PLANTGUARD_UNCERTAINTY_THRESHOLD", "0.65"))
     DEFAULT_MIN_CONFIDENCE = float(os.getenv("PLANTGUARD_MIN_CLASSIFICATION_CONFIDENCE", "0.40"))
 
-    _mahalanobis_cache: Dict[tuple[str, int, int], OODStatistics] = {}
+    _mahalanobis_cache: Dict[tuple[str, int, int, int, int], OODStatistics] = {}
     _cache_lock = RLock()
 
     def __init__(
@@ -55,33 +58,62 @@ class OODDetector:
 
     @classmethod
     def _resolve_ood_path(cls) -> Path:
+        if settings.PLANTGUARD_OOD_CALIBRATION_PATH is not None:
+            return settings.PLANTGUARD_OOD_CALIBRATION_PATH.expanduser()
         candidates = [
-            Path("artifacts/dino_disease/ood.npz"),
-            Path("../artifacts/dino_disease/ood.npz"),
             Path(__file__).resolve().parents[3] / "artifacts" / "dino_disease" / "ood.npz",
         ]
         for c in candidates:
             if c.exists():
                 return c.resolve()
-        return Path("artifacts/dino_disease/ood.npz")
+        return candidates[0]
 
-    def _load_mahalanobis_data(self) -> Optional[OODStatistics]:
+    def _load_mahalanobis_data(self) -> OODStatistics:
         try:
             stat = self.ood_artifact_path.stat()
-        except OSError:
-            return None
-        cache_key = (str(self.ood_artifact_path.resolve()), stat.st_mtime_ns, stat.st_size)
+            metadata_path = self.ood_artifact_path.with_suffix(".json")
+            metadata_stat = metadata_path.stat()
+        except OSError as exc:
+            raise ModelCapabilityError(
+                InferenceErrorCode.OOD_CALIBRATION_UNAVAILABLE,
+                "Required OOD calibration files are unavailable",
+                stage="ood_detection",
+            ) from exc
+        cache_key = (
+            str(self.ood_artifact_path.resolve()),
+            stat.st_mtime_ns,
+            stat.st_size,
+            metadata_stat.st_mtime_ns,
+            metadata_stat.st_size,
+        )
         with self._cache_lock:
             cached = self._mahalanobis_cache.get(cache_key)
             if cached is not None:
                 return cached
 
         try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             with np.load(str(self.ood_artifact_path), allow_pickle=False) as data:
                 means = np.asarray(data["means"], dtype=np.float32)
                 inv_cov = np.asarray(data["inv_cov"], dtype=np.float32)
                 class_labels = np.asarray(data["class_labels"])
                 threshold_values = np.asarray(data["threshold"])
+            if not isinstance(metadata, dict) or threshold_values.size != 1:
+                raise ValueError("OOD calibration metadata or threshold has an invalid shape")
+            metadata_labels = metadata.get("class_labels")
+            if (
+                metadata.get("method") != "class_conditional_mahalanobis"
+                or metadata.get("feature_dimension") != 768
+                or metadata.get("calibration_percentile") != 99.0
+                or metadata_labels != list(range(38))
+                or not np.isclose(
+                    float(metadata.get("threshold", float("nan"))),
+                    float(threshold_values.reshape(())),
+                    rtol=1e-5,
+                    atol=1e-5,
+                )
+            ):
+                raise ValueError("OOD calibration metadata does not match the artifact")
             if (
                 means.shape != (38, 768)
                 or inv_cov.shape != (768, 768)
@@ -97,6 +129,7 @@ class OODDetector:
             threshold = float(threshold_values.reshape(()))
             if not np.isfinite(threshold) or threshold <= 0:
                 raise ValueError("OOD threshold must be positive and finite")
+            np.linalg.cholesky(inv_cov)
 
             validated: OODStatistics = {
                 "means": means,
@@ -110,12 +143,20 @@ class OODDetector:
             with self._cache_lock:
                 self._mahalanobis_cache[cache_key] = validated
             return validated
-        except (OSError, EOFError, KeyError, TypeError, ValueError) as exc:
+        except (OSError, EOFError, KeyError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
             logger.warning(
-                "OOD statistics could not be validated error_type=%s",
+                "OOD calibration could not be validated error_type=%s",
                 type(exc).__name__,
             )
-            return None
+            raise ModelCapabilityError(
+                InferenceErrorCode.OOD_CALIBRATION_UNAVAILABLE,
+                "Required OOD calibration is invalid or incompatible",
+                stage="ood_detection",
+            ) from exc
+
+    def validate_calibration(self) -> None:
+        """Validate calibration prerequisites without loading model checkpoints."""
+        self._load_mahalanobis_data()
 
     def evaluate_features(
         self,
@@ -127,38 +168,26 @@ class OODDetector:
         Evaluate DINOv2 feature embedding using class-conditional Mahalanobis distance.
         """
         data = self._load_mahalanobis_data()
-        if data is None:
-            return OODResult(
-                score=0.0,
-                threshold=0.0,
-                is_ood=False,
-                method="ood_unavailable",
-                status="ood_unavailable",
-                classification_confidence=confidence,
-                calibration_status="ood_unavailable",
-            )
-
         if features is None:
-            return OODResult(
-                score=0.0,
-                threshold=0.0,
-                is_ood=False,
-                method="features_unavailable",
-                status="ood_unavailable",
-                classification_confidence=confidence,
-                calibration_status="ood_unavailable",
+            raise InferenceError(
+                InferenceErrorCode.INVALID_MODEL_OUTPUT,
+                "Classifier did not provide features required for OOD evaluation",
+                stage="ood_detection",
             )
 
-        feat = np.asarray(features, dtype=np.float64)
+        try:
+            feat = np.asarray(features, dtype=np.float64)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise InferenceError(
+                InferenceErrorCode.INVALID_MODEL_OUTPUT,
+                "Classifier features do not match the OOD calibration contract",
+                stage="ood_detection",
+            ) from exc
         if feat.shape not in {(768,), (1, 768)} or not np.isfinite(feat).all():
-            return OODResult(
-                score=0.0,
-                threshold=0.0,
-                is_ood=False,
-                method="invalid_feature_dimension",
-                status="ood_unvalidated",
-                classification_confidence=confidence,
-                calibration_status="unvalidated",
+            raise InferenceError(
+                InferenceErrorCode.INVALID_MODEL_OUTPUT,
+                "Classifier features do not match the OOD calibration contract",
+                stage="ood_detection",
             )
         feat = feat.reshape(768)
 
@@ -166,14 +195,10 @@ class OODDetector:
         inv_cov = data["inv_cov"]
         threshold = data["threshold"]
         if not isinstance(means, np.ndarray) or not isinstance(inv_cov, np.ndarray) or not isinstance(threshold, float):
-            return OODResult(
-                score=0.0,
-                threshold=0.0,
-                is_ood=False,
-                method="invalid_ood_artifact",
-                status="ood_unavailable",
-                classification_confidence=confidence,
-                calibration_status="ood_unavailable",
+            raise ModelCapabilityError(
+                InferenceErrorCode.OOD_CALIBRATION_UNAVAILABLE,
+                "Required OOD calibration is invalid or incompatible",
+                stage="ood_detection",
             )
 
         if (
@@ -182,30 +207,36 @@ class OODDetector:
             or predicted_class < 0
             or predicted_class >= means.shape[0]
         ):
-            return OODResult(
-                score=0.0,
-                threshold=0.0,
-                is_ood=False,
-                method="class_out_of_range",
-                status="ood_unvalidated",
-                classification_confidence=confidence,
-                calibration_status="unvalidated",
+            raise InferenceError(
+                InferenceErrorCode.INVALID_MODEL_OUTPUT,
+                "Classifier class index is outside the OOD calibration mapping",
+                stage="ood_detection",
             )
 
-        diff = feat - means[int(predicted_class)].astype(np.float64, copy=False)
-        distance = float(diff @ inv_cov.astype(np.float64, copy=False) @ diff)
+        try:
+            diff = feat - means[int(predicted_class)].astype(np.float64, copy=False)
+            distance = float(diff @ inv_cov.astype(np.float64, copy=False) @ diff)
+        except (FloatingPointError, TypeError, ValueError, np.linalg.LinAlgError) as exc:
+            raise InferenceError(
+                InferenceErrorCode.INVALID_MODEL_OUTPUT,
+                "OOD scoring could not be completed",
+                stage="ood_detection",
+            ) from exc
         if not np.isfinite(distance) or distance < -1e-6:
-            return OODResult(
-                score=0.0,
-                threshold=0.0,
-                is_ood=False,
-                method="invalid_mahalanobis_distance",
-                status="ood_unvalidated",
-                classification_confidence=confidence,
-                calibration_status="unvalidated",
+            raise InferenceError(
+                InferenceErrorCode.INVALID_MODEL_OUTPUT,
+                "OOD scoring produced an invalid distance",
+                stage="ood_detection",
             )
         distance = max(0.0, distance)
         is_ood = bool(distance > threshold)
+        logger.info(
+            "ood_evaluation_complete method=class_conditional_mahalanobis "
+            "score=%.2f threshold=%.2f threshold_exceeded=%s calibration=in_distribution_percentile_99_only",
+            distance,
+            threshold,
+            is_ood,
+        )
 
         return OODResult(
             score=round(distance, 2),

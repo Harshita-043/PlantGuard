@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,15 @@ MODEL_IDS = {
     "dino_disease_classifier": "dinov2_vitb14_classifier",
     "segformer_disease_segmentation": "segformer_b0_plantseg",
 }
+
+
+@lru_cache(maxsize=256)
+def _file_matches_sha256(path_text: str, size: int, modified_ns: int, expected: str) -> bool:
+    digest = hashlib.sha256()
+    with Path(path_text).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest().lower() == expected.lower()
 
 
 class ModelVariantRegistry:
@@ -34,7 +44,6 @@ class ModelVariantRegistry:
         if self.manifest.get("schema_version") != "1.0.0" or not isinstance(self.manifest.get("models"), dict):
             raise ModelCapabilityError(InferenceErrorCode.INVALID_MODEL_OUTPUT,
                                        "Model variant manifest schema is unsupported", stage="variant_selection")
-        self._verified: dict[tuple[str, int, int, str], bool] = {}
 
     def select(
         self,
@@ -45,6 +54,7 @@ class ModelVariantRegistry:
         memory_limit_gb: float | None = None,
         preference: str = "automatic",
         concurrency: int = 1,
+        requested_variant: str | None = None,
     ) -> dict[str, Any]:
         model_id = MODEL_IDS.get(model_key)
         if model_id is None:
@@ -57,7 +67,27 @@ class ModelVariantRegistry:
         profile = "cuda" if profile.startswith("cuda") else profile
         if preference not in {"automatic", "original"}:
             raise ValueError("Variant preference must be automatic or original")
-        variants = sorted(model.get("variants", []), key=lambda v: self._selection_order(v, preference))
+        variants = model.get("variants", [])
+        if requested_variant is not None:
+            requested_variant = requested_variant.strip()
+            if not requested_variant:
+                raise ModelCapabilityError(
+                    InferenceErrorCode.MISSING_ARTIFACT,
+                    f"Configured variant is empty for {model_id}",
+                    stage="variant_selection",
+                )
+            variants = [
+                variant for variant in variants
+                if variant.get("variant_id") == requested_variant
+                or Path(str(variant.get("path", ""))).stem.endswith(f"_{requested_variant}")
+            ]
+            if not variants:
+                raise ModelCapabilityError(
+                    InferenceErrorCode.MISSING_ARTIFACT,
+                    f"Configured variant is not registered for {model_id}",
+                    stage="variant_selection",
+                )
+        variants = sorted(variants, key=lambda v: self._selection_order(v, preference))
         compatibility_matrix = capabilities.model_compatibility.get(model_id, {})
         compatibility_entry = compatibility_matrix.get(profile, {})
         compatibility = compatibility_entry.get("status")
@@ -200,14 +230,7 @@ class ModelVariantRegistry:
         if not path.is_relative_to(self.root) or not path.is_file():
             return None
         stat = path.stat()
-        key = (str(path), stat.st_size, stat.st_mtime_ns, expected.lower())
-        if key not in self._verified:
-            digest = hashlib.sha256()
-            with path.open("rb") as stream:
-                for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
-                    digest.update(chunk)
-            self._verified[key] = digest.hexdigest().lower() == expected.lower()
-        return path if self._verified[key] else None
+        return path if _file_matches_sha256(str(path), stat.st_size, stat.st_mtime_ns, expected) else None
 
     def _verify_identity_file(self, identity: Any) -> bool:
         if not isinstance(identity, dict):
@@ -224,13 +247,6 @@ class ModelVariantRegistry:
             if not path.is_relative_to(self.root) or not path.is_file():
                 return False
             stat = path.stat()
-            key = (str(path), stat.st_size, stat.st_mtime_ns, expected.lower())
-            if key not in self._verified:
-                digest = hashlib.sha256()
-                with path.open("rb") as stream:
-                    for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
-                        digest.update(chunk)
-                self._verified[key] = digest.hexdigest().lower() == expected.lower()
-            if not self._verified[key]:
+            if not _file_matches_sha256(str(path), stat.st_size, stat.st_mtime_ns, expected):
                 return False
         return True

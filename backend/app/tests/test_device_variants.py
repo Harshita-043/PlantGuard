@@ -20,7 +20,6 @@ def _registry(monkeypatch, variants):
     registry.manifest = {"schema_version": "1.0.0", "models": {
         "dinov2_vitb14_classifier": {"variants": variants},
     }}
-    registry._verified = {}
     registry._verified_path = MethodType(lambda self, variant: Path("verified-checkpoint"), registry)
     return registry
 
@@ -72,6 +71,39 @@ def test_baseline_preference_selects_original_even_if_optimized_is_validated():
     ])
     result = registry.select("dino_disease_classifier", profile="cpu", capabilities=_caps(), preference="original")
     assert result["variant_id"] == "original"
+
+
+def test_explicit_variant_selection_uses_only_the_requested_variant():
+    registry = _registry(None, [
+        _variant("original-pytorch-fp32"),
+        _variant("onnx-fp32", "optimized", validation={"status": "validated"},
+                 benchmark={"latency_ms": 10.0, "ram_peak_gb": 2.0,
+                            "compatibility_results": {"cpu": "verified"}}),
+    ])
+
+    result = registry.select(
+        "dino_disease_classifier",
+        profile="cpu",
+        capabilities=_caps(),
+        requested_variant="original-pytorch-fp32",
+    )
+
+    assert result["variant_id"] == "original-pytorch-fp32"
+
+
+def test_unregistered_explicit_variant_fails_instead_of_falling_back():
+    registry = _registry(None, [_variant("original-pytorch-fp32")])
+
+    with pytest.raises(ModelCapabilityError) as exc:
+        registry.select(
+            "dino_disease_classifier",
+            profile="cpu",
+            capabilities=_caps(),
+            requested_variant="onnx_fp32",
+        )
+
+    assert exc.value.code == InferenceErrorCode.MISSING_ARTIFACT
+    assert "not registered" in str(exc.value)
 
 
 def test_variant_selection_requires_profile_compatibility_and_budget_measurements():
@@ -135,7 +167,6 @@ def test_variant_registry_verifies_hash_without_loading_checkpoint_tensors():
     expected = hashlib.sha256(path.read_bytes()).hexdigest()
     registry = object.__new__(ModelVariantRegistry)
     registry.root = root
-    registry._verified = {}
     assert registry._verified_path(_variant(path="artifacts/dino_disease/classes.json", sha256=expected)) == path
     assert registry._verified_path(_variant(path="artifacts/dino_disease/classes.json", sha256="0" * 64)) is None
 

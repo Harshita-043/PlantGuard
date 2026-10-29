@@ -56,6 +56,7 @@ class Sam2LeafSegmentationAdapter(BaseModelAdapter):
         self.config_name = os.getenv("PLANTGUARD_SAM_CONFIG", "configs/sam2.1/sam2.1_hiera_b+.yaml")
         self._model = None
         self._generator = None
+        self.last_generated_candidate_count = 0
 
     def _resolve_default_path(self) -> Path:
         candidates = [
@@ -189,6 +190,7 @@ class Sam2LeafSegmentationAdapter(BaseModelAdapter):
                                        "SAM2 is not loaded; heuristic proposals are disabled", stage="sam2")
         raw_masks = self._generator.generate(raw_rgb_image)
         candidates = self._filter_and_rank_leaf_candidates(raw_masks, raw_rgb_image.shape[:2])
+        self.last_generated_candidate_count = len(raw_masks)
         for candidate in candidates:
             candidate["method"] = "sam2.1_automatic_mask_generator"
         return candidates

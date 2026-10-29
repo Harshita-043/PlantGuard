@@ -3,7 +3,7 @@ Application Configuration
 """
 from pathlib import Path
 from typing import List, Literal, Optional
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings
 from pydantic_settings import SettingsConfigDict
 
@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, gt=0, le=1440)
     PLANTGUARD_DEVICE: Literal["auto", "cpu", "cuda", "cuda:0", "mps"] = "auto"
     PLANTGUARD_INFERENCE_PROFILE: Literal["auto", "cpu", "cuda", "remote"] = "auto"
+    PLANTGUARD_OOD_CALIBRATION_PATH: Optional[Path] = None
     PLANTGUARD_CPU_MEMORY_LIMIT_GB: Optional[float] = Field(default=None, gt=0)
     PLANTGUARD_CUDA_MEMORY_LIMIT_GB: Optional[float] = Field(default=None, gt=0)
     PLANTGUARD_MAX_CONCURRENCY: int = Field(default=1, ge=1, le=8)
@@ -44,9 +45,14 @@ class Settings(BaseSettings):
     PLANTGUARD_REMOTE_TIMEOUT_SECONDS: float = Field(default=60, gt=0, le=300)
     PLANTGUARD_REMOTE_MAX_CONCURRENCY: int = Field(default=1, ge=1, le=8)
     PLANTGUARD_DIAGNOSTICS_TOKEN: Optional[SecretStr] = None
-    PLANTGUARD_LEAF_FILTER_VERSION: str = "v1"
-    PLANTGUARD_DISEASE_CLASSIFIER_VARIANT: str = "onnx_fp32"
-    PLANTGUARD_SEGFORMER_VARIANT: str = "onnx_int8"
+    PLANTGUARD_LEAF_FILTER_VERSION: str = "v2"
+    PLANTGUARD_DISEASE_CLASSIFIER_VARIANT: str = "original-pytorch-fp32"
+    PLANTGUARD_SEGFORMER_VARIANT: str = "original-transformers-fp32"
+
+    @field_validator("PLANTGUARD_OOD_CALIBRATION_PATH", mode="before")
+    @classmethod
+    def empty_ood_calibration_path_is_unset(cls, value: object) -> object:
+        return None if value == "" else value
 
     model_config = SettingsConfigDict(
         case_sensitive=True,

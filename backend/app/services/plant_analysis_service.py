@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from app.ml.errors import InferenceError, InferenceErrorCode, ModelCapabilityError
+from app.ml.variants import MODEL_IDS
 
 
 class MLCapabilityUnavailable(ModelCapabilityError):
@@ -45,28 +46,76 @@ class ApplicationPlantAnalysisService(PlantAnalysisService):
         return None
 
     def is_ready(self) -> bool:
-        # We report prerequisites only; weights still load lazily at call time.
+        return bool(self.model_readiness()["model_prerequisites"])
+
+    def model_readiness(self) -> Dict[str, Optional[bool]]:
+        """Check required on-demand stages and distinguish SAM2 from its fallback."""
         if isinstance(self.inference, RemoteInferenceClient):
             token = settings.PLANTGUARD_REMOTE_INFERENCE_TOKEN
-            return bool(token and probe_remote_health(settings.PLANTGUARD_REMOTE_INFERENCE_URL or "",
-                                                      token.get_secret_value()) == "available")
-        adapters = (
-            self.inference.sam, self.inference.leaf_filter, self.inference.classifier, self.inference.segmenter
+            available = bool(
+                token and probe_remote_health(settings.PLANTGUARD_REMOTE_INFERENCE_URL or "",
+                                              token.get_secret_value()) == "available"
+            )
+            return {
+                "model_prerequisites": available,
+                "sam2_primary": None,
+                "mobilesam_fallback": None,
+            }
+
+        model_status = {
+            "model_prerequisites": False,
+            "sam2_primary": self._variant_is_selectable(self.inference.sam),
+            "mobilesam_fallback": self._variant_is_selectable(self.inference.mobile_sam),
+        }
+        if not all(importlib.util.find_spec(name) is not None for name in ("torch", "transformers")):
+            return model_status
+        try:
+            self.inference.ood_detector.validate_calibration()
+        except ModelCapabilityError:
+            return model_status
+        if self.inference.segmenter._configuration_error is not None:
+            return model_status
+        class_mapping = self.inference.classifier.get_class_mapping() or {}
+        if len(class_mapping) != 38:
+            return model_status
+        try:
+            for adapter in (self.inference.leaf_filter, self.inference.classifier, self.inference.segmenter):
+                self.inference._select_variant(adapter, MODEL_IDS[adapter.name])
+        except ModelCapabilityError:
+            return model_status
+        model_status["model_prerequisites"] = (
+            model_status["sam2_primary"] is True or model_status["mobilesam_fallback"] is True
         )
-        if not all(adapter.artifact_path.is_file() for adapter in adapters):
+        return model_status
+
+    def _variant_is_selectable(self, adapter) -> bool:
+        if adapter is self.inference.sam:
+            config_rel = Path(adapter.config_name)
+            if config_rel.is_absolute() or ".." in config_rel.parts:
+                return False
+            package_spec = importlib.util.find_spec("sam2")
+            if package_spec is None or package_spec.origin is None:
+                return False
+            package_root = Path(package_spec.origin).resolve().parent
+            if not (package_root / config_rel).is_file():
+                return False
+        try:
+            self.inference._select_variant(adapter, MODEL_IDS[adapter.name])
+            return True
+        except ModelCapabilityError:
             return False
-        if not all(importlib.util.find_spec(name) is not None for name in ("torch", "transformers", "sam2")):
-            return False
-        package_root = Path(importlib.util.find_spec("sam2").origin).resolve().parent.parent
-        if not (package_root / self.inference.sam.config_name).is_file():
-            return False
-        return self.inference.segmenter._configuration_error is None and len(self.inference.classifier.get_class_mapping() or {}) == 38
 
     def get_service_name(self) -> str:
         return "PlantGuardModelInference"
 
     def analyze_image(self, image: np.ndarray, analysis_id: Optional[str] = None) -> PlantAnalysisResponse:
         result = self.inference.analyze(image, analysis_id=analysis_id)
+        if any(leaf.ood is not None and leaf.ood.is_ood for leaf in result.leaves):
+            raise InferenceError(
+                InferenceErrorCode.OUT_OF_DISTRIBUTION,
+                "The legacy response contract cannot represent an OOD abstention",
+                stage="ood_detection",
+            )
         leaf_results = []
         for leaf in result.leaves:
             y0, x0, y1, x1 = leaf.bounding_box

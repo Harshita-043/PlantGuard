@@ -307,3 +307,33 @@ def test_sam2_loader_resolves_config_inside_installed_package(tmp_path, monkeypa
     assert adapter.load("cpu") is True
     assert build_calls == [(adapter.config_name, str(checkpoint), "cpu")]
     adapter.unload()
+
+
+def test_sam2_loader_fails_when_package_config_is_missing(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    from app.ml.adapters.sam_adapter import Sam2LeafSegmentationAdapter
+    from app.ml.errors import InferenceErrorCode
+
+    package_root = tmp_path / "sam2"
+    package_root.mkdir()
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"test")
+    package = types.ModuleType("sam2")
+    package.__file__ = str(package_root / "__init__.py")
+    build_module = types.ModuleType("sam2.build_sam")
+    build_calls = []
+    build_module.build_sam2 = lambda *_args, **_kwargs: build_calls.append(True)
+    generator_module = types.ModuleType("sam2.automatic_mask_generator")
+    generator_module.SAM2AutomaticMaskGenerator = lambda **_kwargs: object()
+    monkeypatch.setitem(sys.modules, "sam2", package)
+    monkeypatch.setitem(sys.modules, "sam2.build_sam", build_module)
+    monkeypatch.setitem(sys.modules, "sam2.automatic_mask_generator", generator_module)
+
+    adapter = Sam2LeafSegmentationAdapter(artifact_path=checkpoint)
+
+    assert adapter.load("cpu") is False
+    assert adapter.load_error_code == InferenceErrorCode.INVALID_CONFIGURATION
+    assert adapter._model is None
+    assert build_calls == []

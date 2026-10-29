@@ -106,6 +106,13 @@ export interface FullScanResult {
   model_versions: Record<string, string>;
   stage_timings_ms: Record<string, number>;
   model_load_timings_ms: Record<string, number>;
+  candidate_counts?: {
+    generated: number;
+    valid: number;
+    deduplicated: number;
+    leaf_filter_accepted: number;
+    disease_analysis_eligible: number;
+  };
   leaves: SingleLeafAnalysis[];
   plant_summary: PlantHealthSummaryV2;
   warnings: PipelineWarning[];

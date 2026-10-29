@@ -187,6 +187,34 @@ class DinoDiseaseClassifierAdapter(BaseModelAdapter):
 
         raise RuntimeError(f"Model {self.name} is not loaded and failure behavior is {self.failure_behavior}")
 
+    def predict_with_features(self, preprocessed_input: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Return classifier probabilities and the normalized DINOv2 CLS embedding."""
+        if not self.is_ready() or self._model is None:
+            raise RuntimeError(f"Model {self.name} is not loaded")
+        import torch
+
+        values = np.asarray(preprocessed_input)
+        if (
+            values.shape != (1, 3, 224, 224)
+            or not np.issubdtype(values.dtype, np.floating)
+            or not np.isfinite(values).all()
+        ):
+            raise ValueError("Classifier input must be finite float32 with shape (1, 3, 224, 224)")
+
+        tensor_in = torch.from_numpy(values.astype(np.float32, copy=False)).to(self.active_device)
+        with torch.inference_mode():
+            logits, features = self._model(tensor_in, return_features=True)
+            if (
+                logits.shape != (1, 38)
+                or features.shape != (1, 768)
+                or not torch.isfinite(logits).all()
+                or not torch.isfinite(features).all()
+            ):
+                raise ValueError("DINOv2 output does not match the classifier and OOD contracts")
+            probabilities = torch.softmax(logits, dim=-1).cpu().numpy()
+            feature_vector = features.cpu().numpy()[0]
+        return probabilities, feature_vector
+
     def predict_with_attention(
         self,
         preprocessed_input: np.ndarray,

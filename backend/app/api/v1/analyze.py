@@ -74,11 +74,13 @@ async def analyze_image(
         ) from exc
 
     try:
-        storage.put(
+        stored_key = storage.put(
             image_content,
             object_key=object_key,
             content_type=content_type,
         )
+        if stored_key != object_key or not storage.exists(object_key):
+            raise StorageError("Uploaded image could not be verified")
     except StorageError as exc:
         logger.error("Image storage write failed for analysis %s", analysis_id)
         _cleanup_after_failed_write(storage, object_key, analysis_id)
@@ -148,7 +150,8 @@ async def analyze_image(
             if exc.code == "artifact_storage_failure"
             else "The configured model or runtime is unavailable"
             if exc.code in {
-                "missing_artifact", "unsupported_runtime", "artifact_integrity", "resource_limit"
+                "missing_artifact", "unsupported_runtime", "artifact_integrity", "resource_limit",
+                "ood_calibration_unavailable",
             }
             else "Plant analysis could not be completed"
         )

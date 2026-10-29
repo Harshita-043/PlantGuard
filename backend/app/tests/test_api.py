@@ -24,8 +24,13 @@ def test_demo_endpoint():
     assert response.json()["message"] == "Hello from PlantGuard AI Backend"
 
 
-def test_analysis_health_endpoint():
+def test_analysis_health_endpoint(monkeypatch):
     """Analysis health does not claim model readiness when prerequisites are absent."""
+    monkeypatch.setattr(
+        analyze,
+        "create_plant_analysis_service",
+        lambda: SimpleNamespace(is_ready=lambda: False),
+    )
     response = client.get("/api/v1/analyze/health")
     assert response.status_code == 503
     data = response.json()

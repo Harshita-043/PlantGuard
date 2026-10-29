@@ -45,6 +45,7 @@ class MobileSamLeafSegmentationAdapter(BaseModelAdapter):
         self.points_per_batch = points_per_batch
         self._model = None
         self._predictor = None
+        self.last_generated_candidate_count = 0
 
     def get_input_contract(self) -> ContractSpec:
         return ContractSpec(
@@ -183,6 +184,7 @@ class MobileSamLeafSegmentationAdapter(BaseModelAdapter):
         candidates = Sam2LeafSegmentationAdapter._filter_and_rank_leaf_candidates(
             generated, raw_rgb_image.shape[:2]
         )
+        self.last_generated_candidate_count = len(generated)
         for candidate in candidates:
             candidate["method"] = "mobilesam.point_grid_predictor"
         return candidates

@@ -25,12 +25,14 @@ def health() -> dict[str, str]:
 
 @router.get("/ready")
 def readiness() -> dict[str, object]:
-    """Return 503 until DB, storage, configured model runtime and loaded models are ready."""
+    """Return 503 until DB, storage, and on-demand model prerequisites are ready."""
     checks: dict[str, object] = {
         "database": False,
         "storage": False,
         "model_prerequisites": False,
-        "models_loaded": False,
+        "sam2_primary": None,
+        "mobilesam_fallback": None,
+        "models_resident": False,
     }
     try:
         if SessionLocal is None:
@@ -50,17 +52,22 @@ def readiness() -> dict[str, object]:
         application_service = create_plant_analysis_service()
         inference = getattr(application_service, "inference", None)
         if isinstance(inference, PlantAnalysisService):
-            checks["model_prerequisites"] = bool(application_service.is_ready())
+            model_checks = application_service.model_readiness()
+            checks.update(model_checks)
             adapters = (inference.sam, inference.leaf_filter, inference.classifier, inference.segmenter)
-            checks["models_loaded"] = all(adapter.is_ready() for adapter in adapters)
+            checks["models_resident"] = all(adapter.is_ready() for adapter in adapters)
         elif inference is not None and settings.PLANTGUARD_INFERENCE_PROFILE == "remote":
             # The remote client performs its own authenticated bounded readiness probe.
-            checks["model_prerequisites"] = bool(application_service.is_ready())
-            checks["models_loaded"] = checks["model_prerequisites"]
+            checks.update(application_service.model_readiness())
+            checks["models_resident"] = None
     except Exception as exc:
+        checks["model_prerequisites"] = False
+        checks["sam2_primary"] = False
+        checks["mobilesam_fallback"] = False
+        checks["models_resident"] = False
         logger.warning("readiness_dependency_failed dependency=models error_type=%s", type(exc).__name__)
 
-    ready = all(checks.values())
+    ready = all(checks[key] for key in ("database", "storage", "model_prerequisites"))
     payload: dict[str, object] = {"status": "ready" if ready else "not_ready", "checks": checks}
     if not ready:
         raise HTTPException(status_code=503, detail=payload)
