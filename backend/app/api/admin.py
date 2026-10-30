@@ -9,9 +9,12 @@ from fastapi import APIRouter, Header, HTTPException
 
 from app.core.config import settings
 from app.ml.device import device_manager
+from app.ml.errors import ModelCapabilityError
 from app.ml.remote import probe_remote_health
 from app.ml.runtime import collect_runtime_capabilities
-from app.ml.registry import model_registry
+from app.ml.service import PlantAnalysisService as ModelInferenceService
+from app.ml.variants import MODEL_IDS, ModelVariantRegistry
+from app.services.plant_analysis_service import create_plant_analysis_service
 
 router = APIRouter(prefix="/admin", tags=["administration"])
 
@@ -59,26 +62,73 @@ def runtime_diagnostics(authorization: Annotated[str | None, Header()] = None):
     manifest_summary = {}
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        adapter_keys = {
-            "sam2_hiera_base_plus": "leaf_instance_segmentation",
-            "dinov2_vits14_leaf_filter": "leaf_filter",
-            "dinov2_vitb14_classifier": "disease_classifier",
-            "segformer_b0_plantseg": "disease_segmentation",
-        }
-        for model_id, model in manifest.get("models", {}).items():
-            variant = next((v for v in model.get("variants", []) if v.get("kind") == "original"), None)
-            adapter = model_registry.get_adapter(adapter_keys.get(model_id, ""))
-            selected = getattr(adapter, "artifact_version", None) if adapter else None
-            if selected and selected not in {"v1", "v2", "plantseg-b0-v1", "sam2.1-hiera-base-plus"}:
-                selected_variant = selected
-            else:
-                selected_variant = None
-            manifest_summary[model_id] = {
-                "configured_candidate": variant.get("variant_id") if variant else None,
-                "last_selected_variant": selected_variant,
-                "selection_status": "pending_runtime_and_checksum_verification" if variant and not variant.get("sha256") else "integrity_check_required_at_load",
-                "optimized_variant_count": sum(1 for v in model.get("variants", []) if v.get("kind") != "original"),
+        if profile == "remote":
+            manifest_summary["remote_pipeline"] = {
+                "artifact_status": "managed_by_remote_service",
+                "initialization_status": "remote",
+                "supported_operations": ["plant_analysis"],
             }
+        else:
+            application_service = create_plant_analysis_service()
+            inference = application_service.inference
+            if not isinstance(inference, ModelInferenceService):
+                raise RuntimeError("local inference service is unavailable")
+            variant_registry = ModelVariantRegistry(manifest_path.parents[1])
+            configured_variants = {
+                "dino_leaf_filter": settings.PLANTGUARD_LEAF_FILTER_VERSION,
+                "dino_disease_classifier": settings.PLANTGUARD_DISEASE_CLASSIFIER_VARIANT,
+                "segformer_disease_segmentation": settings.PLANTGUARD_SEGFORMER_VARIANT,
+            }
+            model_adapters = {
+                "sam2_hiera_base_plus": (inference.sam, "leaf_proposals"),
+                "mobile_sam_vit_t": (inference.mobile_sam, "fallback_leaf_proposals"),
+                "dinov2_vits14_leaf_filter": (inference.leaf_filter, "leaf_candidate_filtering"),
+                "dinov2_vitb14_classifier": (inference.classifier, "disease_classification"),
+                "segformer_b0_plantseg": (inference.segmenter, "lesion_segmentation"),
+            }
+            for model_id, (adapter, operation) in model_adapters.items():
+                model = manifest.get("models", {}).get(model_id, {})
+                original = next(
+                    (item for item in model.get("variants", []) if item.get("kind") == "original"),
+                    None,
+                )
+                compatibility = capabilities.model_compatibility.get(model_id, {}).get(profile, {})
+                selection = None
+                selection_error = None
+                try:
+                    selection = variant_registry.select(
+                        adapter.name,
+                        profile=profile,
+                        capabilities=capabilities,
+                        memory_limit_gb=memory_limit,
+                        concurrency=capabilities.configured_concurrency,
+                        requested_variant=configured_variants.get(adapter.name),
+                    )
+                except ModelCapabilityError as exc:
+                    selection_error = exc.code.value
+
+                is_loaded = adapter.is_ready()
+                manifest_summary[model_id] = {
+                    "configured_candidate": original.get("variant_id") if original else None,
+                    "selected_variant": selection["variant_id"] if selection else None,
+                    "artifact_status": "verified" if selection else "unavailable",
+                    "selection_error_code": selection_error,
+                    "runtime_supported": compatibility.get("status") == "prerequisites_present",
+                    "initialization_status": adapter.loading_status.value,
+                    "loaded_model_identity": (
+                        {"model_id": model_id, "variant_id": adapter.artifact_version}
+                        if is_loaded else None
+                    ),
+                    "device": adapter.active_device if is_loaded else None,
+                    "load_error_code": (
+                        adapter.load_error_code.value
+                        if getattr(adapter.load_error_code, "value", None) else None
+                    ),
+                    "supported_operations": [operation] if selection else [],
+                    "optimized_variant_count": sum(
+                        1 for item in model.get("variants", []) if item.get("kind") != "original"
+                    ),
+                }
     except (OSError, ValueError):
         manifest_summary = {"status": "manifest_unavailable"}
     return {"capabilities": capabilities.public_dict(),

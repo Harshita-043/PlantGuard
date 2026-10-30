@@ -52,6 +52,11 @@ class DinoDiseaseClassifierAdapter(BaseModelAdapter):
         )
         self.classes_path = classes_path or self._resolve_classes_path()
         self._model = None
+        self._onnx_session = None
+        self._onnx_input_name = None
+        self._onnx_logits_name = None
+        self._onnx_embeddings_name = None
+        self.execution_backend = "pytorch-native-dinov2"
         self._class_names: List[str] = self._load_classes()
 
     def _resolve_default_path(self) -> Path:
@@ -130,30 +135,60 @@ class DinoDiseaseClassifierAdapter(BaseModelAdapter):
             return False
 
         try:
-            import torch
-            from app.ml.architectures.dinov2 import build_dino_disease_classifier
-
-            logger.info("Constructing DINOv2 Base model for %s...", self.artifact_path)
-            model = build_dino_disease_classifier()
             if len(self._class_names) != 38:
                 raise ValueError("Disease classifier requires the verified 38-class classes.json mapping")
-            checkpoint = torch.load(str(self.artifact_path), map_location=target_device, weights_only=True)
+            if self.execution_backend == "onnxruntime-cpu":
+                import onnxruntime as ort
 
-            # Refresh classes from checkpoint if present
-            if isinstance(checkpoint, dict) and "classes" in checkpoint and checkpoint["classes"] != self._class_names:
-                raise ValueError("Checkpoint class order does not match classes.json")
+                if target_device != "cpu":
+                    raise ValueError("The ONNX Runtime classifier supports CPU inference only")
+                session = ort.InferenceSession(
+                    str(self.artifact_path),
+                    providers=["CPUExecutionProvider"],
+                )
+                inputs = session.get_inputs()
+                outputs = {output.name: output for output in session.get_outputs()}
+                if (
+                    session.get_providers() != ["CPUExecutionProvider"]
+                    or len(inputs) != 1
+                    or inputs[0].name != "images"
+                    or inputs[0].shape[1:] != [3, 224, 224]
+                    or inputs[0].type != "tensor(float)"
+                    or set(outputs) != {"logits", "embeddings"}
+                    or outputs["logits"].shape[1:] != [38]
+                    or outputs["logits"].type != "tensor(float)"
+                    or outputs["embeddings"].shape[1:] != [768]
+                    or outputs["embeddings"].type != "tensor(float)"
+                ):
+                    raise ValueError("ONNX classifier does not match the logits, embeddings, and preprocessing contract")
+                self._onnx_session = session
+                self._onnx_input_name = inputs[0].name
+                self._onnx_logits_name = "logits"
+                self._onnx_embeddings_name = "embeddings"
+                self.active_device = "cpu"
+            elif self.execution_backend == "pytorch-native-dinov2":
+                import torch
+                from app.ml.architectures.dinov2 import build_dino_disease_classifier
 
-            state_dict = checkpoint.get("state_dict", checkpoint)
-            model.load_state_dict(state_dict, strict=True)
-            model.to(target_device)
-            model.eval()
+                logger.info("Constructing DINOv2 Base model for %s...", self.artifact_path)
+                model = build_dino_disease_classifier()
+                checkpoint = torch.load(str(self.artifact_path), map_location=target_device, weights_only=True)
 
-            self._model = model
+                if isinstance(checkpoint, dict) and "classes" in checkpoint and checkpoint["classes"] != self._class_names:
+                    raise ValueError("Checkpoint class order does not match classes.json")
+
+                state_dict = checkpoint.get("state_dict", checkpoint)
+                model.load_state_dict(state_dict, strict=True)
+                model.to(target_device)
+                model.eval()
+                self._model = model
+            else:
+                raise ValueError(f"Unsupported DINOv2 classifier backend: {self.execution_backend}")
             self.loading_status = ModelLoadingStatus.READY
-            logger.info("DINOv2 disease classifier loaded successfully on %s (strict=True, 38 classes)", target_device)
+            logger.info("DINOv2 disease classifier loaded with backend %s", self.execution_backend)
             return True
         except ImportError as e:
-            self.last_error = f"PyTorch import failed: {e}"
+            self.last_error = f"Inference runtime import failed: {e}"
             self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
             self.loading_status = ModelLoadingStatus.FAILED
             logger.warning(self.last_error)
@@ -168,8 +203,36 @@ class DinoDiseaseClassifierAdapter(BaseModelAdapter):
     def unload(self) -> None:
         """Unload model from RAM."""
         self._model = None
+        self._onnx_session = None
+        self._onnx_input_name = None
+        self._onnx_logits_name = None
+        self._onnx_embeddings_name = None
         self.loading_status = ModelLoadingStatus.UNLOADED
         self.active_device = None
+
+    def _predict_onnx(self, preprocessed_input: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        if not self.is_ready() or self._onnx_session is None:
+            raise RuntimeError(f"Model {self.name} is not loaded")
+        values = np.asarray(preprocessed_input)
+        if values.shape != (1, 3, 224, 224) or values.dtype != np.float32 or not np.isfinite(values).all():
+            raise ValueError("Classifier input must be finite float32 with shape (1, 3, 224, 224)")
+        logits, features = self._onnx_session.run(
+            [self._onnx_logits_name, self._onnx_embeddings_name],
+            {self._onnx_input_name: values},
+        )
+        logits = np.asarray(logits, dtype=np.float32)
+        features = np.asarray(features, dtype=np.float32)
+        if logits.shape != (1, 38) or features.shape != (1, 768):
+            raise ValueError("ONNX classifier output does not match the 38-class and 768-feature contract")
+        if not np.isfinite(logits).all() or not np.isfinite(features).all():
+            raise ValueError("ONNX classifier returned non-finite logits or features")
+        return logits, features[0]
+
+    @staticmethod
+    def _softmax(logits: np.ndarray) -> np.ndarray:
+        shifted = logits - np.max(logits, axis=-1, keepdims=True)
+        exp_values = np.exp(shifted)
+        return (exp_values / np.sum(exp_values, axis=-1, keepdims=True)).astype(np.float32)
 
     def predict(self, preprocessed_input: np.ndarray) -> np.ndarray:
         """
@@ -177,6 +240,9 @@ class DinoDiseaseClassifierAdapter(BaseModelAdapter):
         Returns:
             np.ndarray of shape (1, 38) representing class probabilities.
         """
+        if self.is_ready() and self._onnx_session is not None:
+            logits, _ = self._predict_onnx(preprocessed_input)
+            return self._softmax(logits)
         if self.is_ready() and self._model is not None:
             import torch
             with torch.no_grad():
@@ -189,6 +255,9 @@ class DinoDiseaseClassifierAdapter(BaseModelAdapter):
 
     def predict_with_features(self, preprocessed_input: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Return classifier probabilities and the normalized DINOv2 CLS embedding."""
+        if self.is_ready() and self._onnx_session is not None:
+            logits, features = self._predict_onnx(preprocessed_input)
+            return self._softmax(logits), features
         if not self.is_ready() or self._model is None:
             raise RuntimeError(f"Model {self.name} is not loaded")
         import torch
@@ -219,8 +288,13 @@ class DinoDiseaseClassifierAdapter(BaseModelAdapter):
         self,
         preprocessed_input: np.ndarray,
         return_features: bool = False,
-    ) -> Tuple[np.ndarray, np.ndarray] | Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]] | Tuple[np.ndarray, Optional[np.ndarray], np.ndarray]:
         """Return probabilities and residual-aware rollout across every backbone block."""
+        if self.is_ready() and self._onnx_session is not None:
+            probabilities, features = self.predict_with_features(preprocessed_input)
+            if return_features:
+                return probabilities, None, features
+            return probabilities, None
         if not self.is_ready() or self._model is None:
             raise RuntimeError(f"Model {self.name} is not loaded")
         import torch

@@ -54,6 +54,10 @@ class SegFormerDiseaseSegmentationAdapter(BaseModelAdapter):
         self.config_path = config_path or (self.artifact_path.parent / "config.json")
         self.preprocessing_path = self.artifact_path.parent / "preprocessing.json"
         self._model = None
+        self._onnx_session = None
+        self._onnx_input_name = None
+        self._onnx_output_name = None
+        self.execution_backend = "pytorch-transformers"
         self._class_mapping = {0: "background", 1: "diseased_region"}
         self._target_size = (512, 512)
         self._mean = (0.485, 0.456, 0.406)
@@ -150,23 +154,52 @@ class SegFormerDiseaseSegmentationAdapter(BaseModelAdapter):
             return False
 
         try:
-            from transformers import SegformerForSemanticSegmentation
-            model_dir = str(self.artifact_path.parent)
-            logger.info("Loading local SegFormer-B0 from %s onto %s (local_files_only=True)...", model_dir, target_device)
+            if self.execution_backend == "onnxruntime-cpu":
+                import onnxruntime as ort
 
-            model = SegformerForSemanticSegmentation.from_pretrained(
-                model_dir,
-                local_files_only=True,
-            )
-            model.to(target_device)
-            model.eval()
+                if target_device != "cpu":
+                    raise ValueError("The ONNX Runtime SegFormer INT8 variant supports CPU inference only")
+                session = ort.InferenceSession(
+                    str(self.artifact_path),
+                    providers=["CPUExecutionProvider"],
+                )
+                inputs = session.get_inputs()
+                outputs = session.get_outputs()
+                if (
+                    session.get_providers() != ["CPUExecutionProvider"]
+                    or len(inputs) != 1
+                    or inputs[0].name != "pixel_values"
+                    or inputs[0].shape != [1, 3, 512, 512]
+                    or inputs[0].type != "tensor(float)"
+                    or len(outputs) != 1
+                    or outputs[0].name != "logits"
+                    or outputs[0].shape != [1, 2, 512, 512]
+                    or outputs[0].type != "tensor(float)"
+                ):
+                    raise ValueError("ONNX SegFormer does not match the PlantSeg input/output contract")
+                self._onnx_session = session
+                self._onnx_input_name = inputs[0].name
+                self._onnx_output_name = outputs[0].name
+                self.active_device = "cpu"
+            elif self.execution_backend == "pytorch-transformers":
+                from transformers import SegformerForSemanticSegmentation
+                model_dir = str(self.artifact_path.parent)
+                logger.info("Loading local SegFormer-B0 from %s onto %s (local_files_only=True)...", model_dir, target_device)
 
-            self._model = model
+                model = SegformerForSemanticSegmentation.from_pretrained(
+                    model_dir,
+                    local_files_only=True,
+                )
+                model.to(target_device)
+                model.eval()
+                self._model = model
+            else:
+                raise ValueError(f"Unsupported SegFormer backend: {self.execution_backend}")
             self.loading_status = ModelLoadingStatus.READY
-            logger.info("SegFormer-B0 loaded successfully on %s (208 layers)", target_device)
+            logger.info("SegFormer-B0 loaded with backend %s", self.execution_backend)
             return True
         except ImportError as e:
-            self.last_error = f"Transformers/PyTorch import failed: {e}"
+            self.last_error = f"Inference runtime import failed: {e}"
             self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
             self.loading_status = ModelLoadingStatus.FAILED
             logger.warning(self.last_error)
@@ -181,6 +214,9 @@ class SegFormerDiseaseSegmentationAdapter(BaseModelAdapter):
     def unload(self) -> None:
         """Unload model from RAM."""
         self._model = None
+        self._onnx_session = None
+        self._onnx_input_name = None
+        self._onnx_output_name = None
         self.loading_status = ModelLoadingStatus.UNLOADED
         self.active_device = None
 
@@ -196,6 +232,36 @@ class SegFormerDiseaseSegmentationAdapter(BaseModelAdapter):
             np.ndarray uint8 binary mask (0 or 1).
         """
         target_h, target_w = original_shape or self._target_size
+
+        if self.is_ready() and self._onnx_session is not None:
+            values = np.asarray(preprocessed_input)
+            if (
+                values.shape != (1, 3, 512, 512)
+                or values.dtype != np.float32
+                or not np.isfinite(values).all()
+            ):
+                raise ValueError("SegFormer input must be finite float32 with shape (1, 3, 512, 512)")
+            if target_h <= 0 or target_w <= 0:
+                raise ValueError("SegFormer output dimensions must be positive")
+            logits = np.asarray(
+                self._onnx_session.run(
+                    [self._onnx_output_name],
+                    {self._onnx_input_name: values},
+                )[0],
+                dtype=np.float32,
+            )
+            if logits.shape != (1, 2, 512, 512) or not np.isfinite(logits).all():
+                raise ValueError("ONNX SegFormer returned invalid PlantSeg logits")
+            import torch
+            with torch.inference_mode():
+                tensor_logits = torch.from_numpy(logits)
+                resized_logits = torch.nn.functional.interpolate(
+                    tensor_logits,
+                    size=(target_h, target_w),
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                return torch.argmax(resized_logits, dim=1).squeeze(0).numpy().astype(np.uint8)
 
         if self.is_ready() and self._model is not None:
             import torch

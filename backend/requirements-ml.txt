@@ -9,6 +9,7 @@ iopath>=0.1.10,<0.2
 opencv-python>=4.9,<5
 psutil>=5.9,<8
 timm==1.0.30
+onnxruntime>=1.20,<2
 # Editable install keeps the official package-relative YAML configs resolvable.
 -e git+https://github.com/facebookresearch/sam2.git#egg=SAM-2
 # Pin the official MobileSAM source used by the fallback adapter.

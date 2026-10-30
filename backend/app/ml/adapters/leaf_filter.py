@@ -3,7 +3,8 @@ DINOv2 Small Leaf Filter Model Adapter.
 
 Classifies image crops into binary leaf / non-leaf candidates before
 passing them down the disease diagnosis pipeline.
-Artifact: `artifacts/dino_leaf_filter/dino_leaf_filter_v2.pt` (or v1).
+Artifact: `artifacts/dino_leaf_filter/dino_leaf_filter.pt` (v1), with an
+optional validated ONNX Runtime INT8 variant.
 """
 
 import logging
@@ -36,7 +37,7 @@ class DinoLeafFilterAdapter(BaseModelAdapter):
     def __init__(
         self,
         artifact_path: Optional[Path] = None,
-        artifact_version: str = "v2",
+        artifact_version: str = "v1",
         failure_behavior: FailureBehavior = FailureBehavior.FAIL_FAST,
     ):
         path = artifact_path or self._resolve_default_path()
@@ -49,20 +50,24 @@ class DinoLeafFilterAdapter(BaseModelAdapter):
             evaluation_status=EvaluationStatus.UNTESTED,
         )
         self._model = None
+        self._onnx_session = None
+        self._onnx_input_name = None
+        self._onnx_output_name = None
+        self.execution_backend = "pytorch-native-dinov2"
         self._class_mapping = {0: "negative", 1: "positive"}
 
     def _resolve_default_path(self) -> Path:
-        """Resolve path to leaf filter weights prioritizing v2."""
+        """Resolve path to leaf filter weights prioritizing v1."""
         candidates = [
-            Path("artifacts/dino_leaf_filter/dino_leaf_filter_v2.pt"),
             Path("artifacts/dino_leaf_filter/dino_leaf_filter.pt"),
-            Path("../artifacts/dino_leaf_filter/dino_leaf_filter_v2.pt"),
+            Path("artifacts/dino_leaf_filter/dino_leaf_filter_v2.pt"),
             Path("../artifacts/dino_leaf_filter/dino_leaf_filter.pt"),
+            Path("../artifacts/dino_leaf_filter/dino_leaf_filter_v2.pt"),
         ]
         for c in candidates:
             if c.exists():
                 return c.resolve()
-        return Path("artifacts/dino_leaf_filter/dino_leaf_filter_v2.pt")
+        return Path("artifacts/dino_leaf_filter/dino_leaf_filter.pt")
 
     def get_input_contract(self) -> ContractSpec:
         return ContractSpec(
@@ -105,24 +110,54 @@ class DinoLeafFilterAdapter(BaseModelAdapter):
             return False
 
         try:
-            import torch
-            from app.ml.architectures.dinov2 import build_dino_leaf_filter
+            if self.execution_backend == "onnxruntime-cpu":
+                import onnxruntime as ort
 
-            logger.info("Constructing DINOv2 Small model for %s...", self.artifact_path)
-            model = build_dino_leaf_filter()
-            checkpoint = torch.load(str(self.artifact_path), map_location=target_device, weights_only=True)
+                if target_device != "cpu":
+                    raise ValueError("The ONNX Runtime INT8 leaf filter supports CPU inference only")
+                session = ort.InferenceSession(
+                    str(self.artifact_path),
+                    providers=["CPUExecutionProvider"],
+                )
+                inputs = session.get_inputs()
+                outputs = session.get_outputs()
+                if (
+                    session.get_providers() != ["CPUExecutionProvider"]
+                    or len(inputs) != 1
+                    or inputs[0].name != "pixel_values"
+                    or inputs[0].shape != [1, 3, 224, 224]
+                    or inputs[0].type != "tensor(float)"
+                    or len(outputs) != 1
+                    or outputs[0].name != "logits"
+                    or outputs[0].shape != [1]
+                    or outputs[0].type != "tensor(float)"
+                ):
+                    raise ValueError("ONNX leaf filter does not match the configured input/output contract")
+                self._onnx_session = session
+                self._onnx_input_name = inputs[0].name
+                self._onnx_output_name = outputs[0].name
+                self.active_device = "cpu"
+            elif self.execution_backend == "pytorch-native-dinov2":
+                import torch
+                from app.ml.architectures.dinov2 import build_dino_leaf_filter
 
-            state_dict = checkpoint.get("state_dict", checkpoint)
-            model.load_state_dict(state_dict, strict=True)
-            model.to(target_device)
-            model.eval()
+                logger.info("Constructing DINOv2 Small model for %s...", self.artifact_path)
+                model = build_dino_leaf_filter()
+                checkpoint = torch.load(str(self.artifact_path), map_location=target_device, weights_only=True)
 
-            self._model = model
+                state_dict = checkpoint.get("state_dict", checkpoint)
+                model.load_state_dict(state_dict, strict=True)
+                model.to(target_device)
+                model.eval()
+                self._model = model
+            else:
+                raise ValueError(f"Unsupported DINOv2 leaf-filter backend: {self.execution_backend}")
+
             self.loading_status = ModelLoadingStatus.READY
-            logger.info("DINOv2 leaf filter loaded successfully on %s (strict=True)", target_device)
+            logger.info("DINOv2 leaf filter loaded successfully with backend %s", self.execution_backend)
             return True
         except ImportError as e:
-            self.last_error = f"PyTorch import failed: {e}"
+            self.last_error = f"Inference runtime import failed: {e}"
             self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
             self.loading_status = ModelLoadingStatus.FAILED
             logger.warning(self.last_error)
@@ -137,6 +172,9 @@ class DinoLeafFilterAdapter(BaseModelAdapter):
     def unload(self) -> None:
         """Unload model from RAM."""
         self._model = None
+        self._onnx_session = None
+        self._onnx_input_name = None
+        self._onnx_output_name = None
         self.loading_status = ModelLoadingStatus.UNLOADED
         self.active_device = None
 
@@ -146,6 +184,26 @@ class DinoLeafFilterAdapter(BaseModelAdapter):
         Returns:
             np.ndarray of shape (1, 2) representing [prob_negative, prob_positive].
         """
+        if self.is_ready() and self._onnx_session is not None:
+            values = np.asarray(preprocessed_input)
+            if (
+                values.shape != (1, 3, 224, 224)
+                or values.dtype != np.float32
+                or not np.isfinite(values).all()
+            ):
+                raise ValueError("Leaf-filter input must be finite float32 with shape (1, 3, 224, 224)")
+            logits = np.asarray(
+                self._onnx_session.run(
+                    [self._onnx_output_name],
+                    {self._onnx_input_name: values},
+                )[0],
+                dtype=np.float32,
+            )
+            if logits.shape != (1,) or not np.isfinite(logits).all():
+                raise ValueError("ONNX leaf filter returned invalid logits")
+            probability_positive = 1.0 / (1.0 + np.exp(-np.clip(logits, -80.0, 80.0)))
+            return np.stack((1.0 - probability_positive, probability_positive), axis=1).astype(np.float32)
+
         if self.is_ready() and self._model is not None:
             import torch
             with torch.no_grad():

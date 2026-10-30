@@ -21,6 +21,15 @@ MODEL_IDS = {
 }
 
 
+def is_git_lfs_pointer(path: Path) -> bool:
+    """Return whether a file contains a Git LFS pointer instead of artifact bytes."""
+    try:
+        with path.open("rb") as stream:
+            return stream.readline(128).rstrip(b"\r\n") == b"version https://git-lfs.github.com/spec/v1"
+    except OSError:
+        return False
+
+
 @lru_cache(maxsize=256)
 def _file_matches_sha256(path_text: str, size: int, modified_ns: int, expected: str) -> bool:
     digest = hashlib.sha256()
@@ -79,6 +88,7 @@ class ModelVariantRegistry:
             variants = [
                 variant for variant in variants
                 if variant.get("variant_id") == requested_variant
+                or variant.get("model_version") == requested_variant
                 or Path(str(variant.get("path", ""))).stem.endswith(f"_{requested_variant}")
             ]
             if not variants:
@@ -127,6 +137,13 @@ class ModelVariantRegistry:
                 if variant.get("benchmark", {}).get("compatibility_results", {}).get(profile) != "verified":
                     reasons.append(f"{variant.get('variant_id')}: runtime compatibility is not verified")
                     continue
+                if str(variant.get("backend", "")).startswith("onnxruntime"):
+                    if not getattr(capabilities, "inference_backends", {}).get("onnxruntime", False):
+                        reasons.append(f"{variant.get('variant_id')}: ONNX Runtime is unavailable")
+                        continue
+                    if not getattr(capabilities, "package_version_compatibility", {}).get("onnxruntime", False):
+                        reasons.append(f"{variant.get('variant_id')}: ONNX Runtime version is incompatible")
+                        continue
             if profile not in variant.get("device_profiles", []):
                 reasons.append(f"{variant.get('variant_id')}: profile not listed")
                 continue
@@ -144,7 +161,12 @@ class ModelVariantRegistry:
                 continue
             artifact = self._verified_path(variant)
             if artifact is None:
-                reasons.append(f"{variant.get('variant_id')}: missing artifact or SHA-256 mismatch/unavailable")
+                if self._is_unhydrated_lfs_pointer(variant):
+                    reasons.append(
+                        f"{variant.get('variant_id')}: unhydrated Git LFS pointer; checkpoint data is unavailable"
+                    )
+                else:
+                    reasons.append(f"{variant.get('variant_id')}: missing artifact or SHA-256 mismatch/unavailable")
                 continue
 
             def resolve_identity(key: str):
@@ -187,7 +209,10 @@ class ModelVariantRegistry:
 
         package_versions = getattr(capabilities, "packages", {})
         package_compatibility = getattr(capabilities, "package_version_compatibility", {})
-        package_names = ("torch", "torchvision", "transformers", "safetensors", "sam2", "mobile_sam", "timm")
+        package_names = (
+            "torch", "torchvision", "transformers", "safetensors", "sam2",
+            "mobile_sam", "timm", "onnxruntime",
+        )
         for requirement in requirements:
             package = next(
                 (name for name in package_names if requirement.lower().startswith(name)),
@@ -229,8 +254,17 @@ class ModelVariantRegistry:
         path = (self.root / relative).resolve()
         if not path.is_relative_to(self.root) or not path.is_file():
             return None
+        if is_git_lfs_pointer(path):
+            return None
         stat = path.stat()
         return path if _file_matches_sha256(str(path), stat.st_size, stat.st_mtime_ns, expected) else None
+
+    def _is_unhydrated_lfs_pointer(self, variant: dict[str, Any]) -> bool:
+        relative = variant.get("path")
+        if not isinstance(relative, str):
+            return False
+        path = (self.root / relative).resolve()
+        return path.is_relative_to(self.root) and path.is_file() and is_git_lfs_pointer(path)
 
     def _verify_identity_file(self, identity: Any) -> bool:
         if not isinstance(identity, dict):

@@ -113,7 +113,7 @@ class ApplicationPlantAnalysisService(PlantAnalysisService):
         if any(leaf.ood is not None and leaf.ood.is_ood for leaf in result.leaves):
             raise InferenceError(
                 InferenceErrorCode.OUT_OF_DISTRIBUTION,
-                "The legacy response contract cannot represent an OOD abstention",
+                "The legacy response contract cannot represent classifier output together with OOD status",
                 stage="ood_detection",
             )
         leaf_results = []

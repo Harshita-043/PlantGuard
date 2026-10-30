@@ -1,6 +1,7 @@
 """MobileSAM ViT-T candidate generation using the official PyTorch package."""
 
 import logging
+import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -97,15 +98,39 @@ class MobileSamLeafSegmentationAdapter(BaseModelAdapter):
             from mobile_sam import SamPredictor, sam_model_registry
 
             if target_device.startswith("cuda") and not torch.cuda.is_available():
-                raise RuntimeError("CUDA was requested but is unavailable")
+                self.last_error = "CUDA was requested but is unavailable"
+                self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
+                self.loading_status = ModelLoadingStatus.FAILED
+                return False
             if target_device == "mps" and not (
                 hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
             ):
-                raise RuntimeError("MPS was requested but is unavailable")
+                self.last_error = "MPS was requested but is unavailable"
+                self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
+                self.loading_status = ModelLoadingStatus.FAILED
+                return False
             if target_device not in {"cpu", "mps"} and not target_device.startswith("cuda"):
-                raise RuntimeError(f"Unsupported MobileSAM device: {target_device}")
+                self.last_error = f"Unsupported MobileSAM device: {target_device}"
+                self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
+                self.loading_status = ModelLoadingStatus.FAILED
+                return False
 
-            model = sam_model_registry["vit_t"](checkpoint=str(self.artifact_path))
+            try:
+                state_dict = torch.load(
+                    str(self.artifact_path),
+                    map_location="cpu",
+                    weights_only=True,
+                )
+            except (EOFError, OSError, pickle.UnpicklingError, RuntimeError) as exc:
+                self.last_error = f"MobileSAM checkpoint could not be safely deserialized: {type(exc).__name__}"
+                self.load_error_code = InferenceErrorCode.ARTIFACT_INTEGRITY
+                self.loading_status = ModelLoadingStatus.FAILED
+                logger.warning("%s", self.last_error)
+                return False
+
+            model = sam_model_registry["vit_t"](checkpoint=None)
+            self._validate_state_dict(model, state_dict, torch)
+            model.load_state_dict(state_dict, strict=True)
             model.to(device=target_device).eval()
             self._model = model
             self._predictor = SamPredictor(model)
@@ -116,12 +141,34 @@ class MobileSamLeafSegmentationAdapter(BaseModelAdapter):
             self.last_error = "MobileSAM PyTorch package is unavailable"
             self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
             logger.warning("%s: %s", self.last_error, type(exc).__name__)
-        except (OSError, RuntimeError, ValueError) as exc:
-            self.last_error = f"MobileSAM could not load on the requested device: {type(exc).__name__}"
-            self.load_error_code = InferenceErrorCode.UNSUPPORTED_RUNTIME
+        except (RuntimeError, TypeError, ValueError) as exc:
+            self.last_error = f"MobileSAM checkpoint is incompatible with the ViT-T architecture: {exc}"
+            self.load_error_code = InferenceErrorCode.MODEL_FAILURE
             logger.warning("%s", self.last_error)
         self.loading_status = ModelLoadingStatus.FAILED
         return False
+
+    @staticmethod
+    def _validate_state_dict(model: Any, state_dict: Any, torch: Any) -> None:
+        if not isinstance(state_dict, dict) or any(
+            not isinstance(key, str) or not torch.is_tensor(value)
+            for key, value in state_dict.items()
+        ):
+            raise ValueError("expected a plain tensor state dictionary")
+
+        model_state = model.state_dict()
+        missing = sorted(model_state.keys() - state_dict.keys())
+        unexpected = sorted(state_dict.keys() - model_state.keys())
+        mismatched_shapes = sorted(
+            key for key in model_state.keys() & state_dict.keys()
+            if model_state[key].shape != state_dict[key].shape
+        )
+        if missing or unexpected or mismatched_shapes:
+            raise ValueError(
+                "state dictionary does not match ViT-T keys or tensor shapes "
+                f"(missing={missing[:5]}, unexpected={unexpected[:5]}, "
+                f"shape_mismatches={mismatched_shapes[:5]})"
+            )
 
     def unload(self) -> None:
         self._predictor = None

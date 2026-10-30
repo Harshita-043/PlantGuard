@@ -221,18 +221,40 @@ def test_model_registry_artifact_discovery():
     assert "disease_segmentation" in inventory
     assert "leaf_instance_segmentation" in inventory
 
-    # Check physical paths and validity
+    # LFS pointer text is not a usable checkpoint and must not be inventoried as one.
     lf = inventory["leaf_filter"]
-    assert lf.resolved_path is not None
-    assert lf.size_bytes > 50_000_000
+    if lf.resolved_path is None:
+        assert lf.is_valid is False
+        assert lf.size_bytes == 0
+    else:
+        assert lf.size_bytes > 10_000_000
+        assert lf.is_valid is True
 
     dc = inventory["disease_classifier"]
-    assert dc.resolved_path is not None
     assert dc.metadata.get("num_classes") == 38
+    if dc.resolved_path is None:
+        assert dc.is_valid is False
+        assert dc.size_bytes == 0
+    else:
+        assert dc.size_bytes > 50_000_000
+        assert dc.is_valid is True
 
     ds = inventory["disease_segmentation"]
-    assert ds.resolved_path is not None
     assert ds.format_type == "safetensors"
+    if ds.resolved_path is None:
+        assert ds.is_valid is False
+        assert ds.size_bytes == 0
+    else:
+        assert ds.size_bytes > 1_000_000
+        assert ds.is_valid is True
+
+    sam = inventory["leaf_instance_segmentation"]
+    if sam.resolved_path is None:
+        assert sam.is_valid is False
+        assert sam.size_bytes == 0
+    else:
+        assert sam.size_bytes > 100_000_000
+        assert sam.is_valid is True
 
 
 def test_model_registry_efficientnet_rule_enforced():

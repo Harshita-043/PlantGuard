@@ -22,7 +22,7 @@ def test_analysis_service_is_created_lazily():
     assert not service.inference.leaf_filter.is_ready()
 
 
-def test_legacy_adapter_rejects_ood_abstention():
+def test_legacy_adapter_rejects_ood_result_it_cannot_represent():
     result = SimpleNamespace(
         leaves=[SimpleNamespace(ood=SimpleNamespace(is_ood=True))],
     )

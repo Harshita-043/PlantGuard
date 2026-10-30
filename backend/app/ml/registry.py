@@ -21,6 +21,7 @@ from app.ml.interfaces.adapter import (
     FailureBehavior,
     ModelLoadingStatus,
 )
+from app.ml.variants import is_git_lfs_pointer
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +78,13 @@ class ModelRegistry:
         else:
             chosen_lf = lf_v1_path
             ver_label = "v1"
+        lf_available = chosen_lf.is_file() and not is_git_lfs_pointer(chosen_lf)
         inventory["leaf_filter"] = ArtifactDescriptor(
             name=f"DINOv2 Small Leaf Filter ({ver_label})",
-            relative_path=str(chosen_lf.relative_to(self.workspace_root) if chosen_lf.exists() else chosen_lf),
-            resolved_path=chosen_lf if chosen_lf.exists() else None,
-            size_bytes=chosen_lf.stat().st_size if chosen_lf.exists() else 0,
-            is_valid=chosen_lf.exists() and chosen_lf.stat().st_size > 10_000_000,
+            relative_path=str(chosen_lf.relative_to(self.workspace_root)),
+            resolved_path=chosen_lf if lf_available else None,
+            size_bytes=chosen_lf.stat().st_size if lf_available else 0,
+            is_valid=lf_available and chosen_lf.stat().st_size > 10_000_000,
             format_type="pytorch_zip",
             metadata={"classes": ["negative", "positive"], "backbone": "dinov2_vits14", "version": ver_label},
         )
@@ -98,12 +100,13 @@ class ModelRegistry:
             except Exception:
                 pass
 
+        dc_available = dc_path.is_file() and not is_git_lfs_pointer(dc_path)
         inventory["disease_classifier"] = ArtifactDescriptor(
             name="DINOv2 Base Disease Classifier",
-            relative_path=str(dc_path.relative_to(self.workspace_root) if dc_path.exists() else dc_path),
-            resolved_path=dc_path if dc_path.exists() else None,
-            size_bytes=dc_path.stat().st_size if dc_path.exists() else 0,
-            is_valid=dc_path.exists() and dc_path.stat().st_size > 50_000_000 and len(classes) == 38,
+            relative_path=str(dc_path.relative_to(self.workspace_root)),
+            resolved_path=dc_path if dc_available else None,
+            size_bytes=dc_path.stat().st_size if dc_available else 0,
+            is_valid=dc_available and dc_path.stat().st_size > 50_000_000 and len(classes) == 38,
             format_type="pytorch_zip",
             metadata={"num_classes": len(classes), "classes": classes, "backbone": "dinov2_vitb14"},
         )
@@ -120,12 +123,13 @@ class ModelRegistry:
             except Exception:
                 pass
 
+        sf_available = sf_path.is_file() and not is_git_lfs_pointer(sf_path)
         inventory["disease_segmentation"] = ArtifactDescriptor(
             name="SegFormer-B0 PlantSeg Disease Segmenter",
-            relative_path=str(sf_path.relative_to(self.workspace_root) if sf_path.exists() else sf_path),
-            resolved_path=sf_path if sf_path.exists() else None,
-            size_bytes=sf_path.stat().st_size if sf_path.exists() else 0,
-            is_valid=sf_path.exists() and sf_path.stat().st_size > 1_000_000 and sf_config_path.exists(),
+            relative_path=str(sf_path.relative_to(self.workspace_root)),
+            resolved_path=sf_path if sf_available else None,
+            size_bytes=sf_path.stat().st_size if sf_available else 0,
+            is_valid=sf_available and sf_path.stat().st_size > 1_000_000 and sf_config_path.exists(),
             format_type="safetensors",
             metadata={
                 "model_type": sf_config.get("model_type", "segformer"),
@@ -136,12 +140,13 @@ class ModelRegistry:
 
         # 4. SAM 2.1 Hiera Base+
         sam_path = self.workspace_root / "artifacts" / "sam2" / "sam2.1_hiera_base_plus.pt"
+        sam_available = sam_path.is_file() and not is_git_lfs_pointer(sam_path)
         inventory["leaf_instance_segmentation"] = ArtifactDescriptor(
             name="SAM 2.1 Hiera Base+",
-            relative_path=str(sam_path.relative_to(self.workspace_root) if sam_path.exists() else sam_path),
-            resolved_path=sam_path if sam_path.exists() else None,
-            size_bytes=sam_path.stat().st_size if sam_path.exists() else 0,
-            is_valid=sam_path.exists() and sam_path.stat().st_size > 100_000_000,
+            relative_path=str(sam_path.relative_to(self.workspace_root)),
+            resolved_path=sam_path if sam_available else None,
+            size_bytes=sam_path.stat().st_size if sam_available else 0,
+            is_valid=sam_available and sam_path.stat().st_size > 100_000_000,
             format_type="pytorch_zip",
             metadata={"backbone": "sam2.1_hiera_base_plus", "device_recommendation": "cuda_only_for_full_grid"},
         )

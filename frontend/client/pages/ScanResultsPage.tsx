@@ -22,7 +22,7 @@ import {
 import LeafOverlay from "@/components/scan/LeafOverlay";
 import {
   formatClassName,
-  isOodRejected,
+  isOodFlagged,
   isProvisionalCandidate,
   validCoverage,
   visualizationModes,
@@ -31,6 +31,7 @@ import {
 const summarizedWarningCodes = new Set([
   "RELIABILITY_UNCALIBRATED",
   "SEVERITY_THRESHOLDS_UNVALIDATED",
+  "OOD_FLAGGED_UNVALIDATED",
   "OOD_ABSTENTION_UNVALIDATED",
   "LOW_CLASSIFICATION_CONFIDENCE",
   "HIGH_PREDICTION_UNCERTAINTY",
@@ -217,16 +218,18 @@ export default function ScanResultsPage() {
   }
 
   const result = analysis.result;
-  const rejectedLeaves = result?.leaves.filter(isOodRejected) ?? [];
+  const oodFlaggedLeaves = result?.leaves.filter(isOodFlagged) ?? [];
+  const classifierOutputs =
+    result?.leaves.filter((leaf) => leaf.classification !== null) ?? [];
   const candidateLeaves = result?.leaves.filter(isProvisionalCandidate) ?? [];
   const unverifiedPredictions =
     result?.leaves.filter(
       (leaf) =>
         leaf.classification &&
-        !isOodRejected(leaf) &&
-        !isProvisionalCandidate(leaf),
+        !isProvisionalCandidate(leaf) &&
+        !isOodFlagged(leaf),
     ) ?? [];
-  const hasOodRejection = rejectedLeaves.length > 0;
+  const hasOodFlag = oodFlaggedLeaves.length > 0;
   const original = assetLinks.find((asset) => asset.kind === "original");
   const originalSource = original
     ? assetSources[original.storage_key]
@@ -374,10 +377,7 @@ export default function ScanResultsPage() {
           role="status"
           aria-label="Partial analysis"
         >
-          <AlertTriangle
-            size={20}
-            className="mt-0.5 shrink-0 text-amber-600"
-          />
+          <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-600" />
           <div>
             <h2 className="font-semibold">Partial analysis</h2>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -392,7 +392,7 @@ export default function ScanResultsPage() {
         <>
           <section
             className={`grid overflow-hidden rounded-2xl border bg-card lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)] ${
-              hasOodRejection ? "border-amber-500/40" : "border-border"
+              hasOodFlag ? "border-amber-500/40" : "border-border"
             }`}
             aria-labelledby="diagnosis-title"
           >
@@ -400,12 +400,12 @@ export default function ScanResultsPage() {
               <div className="flex items-start gap-3">
                 <span
                   className={`grid size-10 shrink-0 place-items-center rounded-xl ${
-                    hasOodRejection
+                    hasOodFlag
                       ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
                       : "bg-primary/10 text-primary"
                   }`}
                 >
-                  {hasOodRejection ? (
+                  {hasOodFlag ? (
                     <ShieldAlert size={20} />
                   ) : (
                     <CheckCircle2 size={20} />
@@ -413,13 +413,13 @@ export default function ScanResultsPage() {
                 </span>
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {hasOodRejection ? "Review required" : "Model assessment"}
+                    {hasOodFlag ? "Review required" : "Model assessment"}
                   </p>
                   <h2
                     id="diagnosis-title"
                     className="mt-1 text-xl font-bold sm:text-2xl"
                   >
-                    {hasOodRejection
+                    {hasOodFlag
                       ? "Potential out-of-distribution input"
                       : candidateLeaves.length > 0
                         ? "Provisional classification candidate"
@@ -427,21 +427,21 @@ export default function ScanResultsPage() {
                   </h2>
                 </div>
               </div>
-              {hasOodRejection ? (
+              {hasOodFlag ? (
                 <div className="space-y-3" role="status">
                   <p className="font-medium">
-                    Disease classification withheld for {rejectedLeaves.length}{" "}
-                    {rejectedLeaves.length === 1 ? "leaf" : "leaves"}.
+                    OOD threshold exceeded for {oodFlaggedLeaves.length}{" "}
+                    {oodFlaggedLeaves.length === 1 ? "leaf" : "leaves"}.
                   </p>
                   <p className="text-sm leading-relaxed text-muted-foreground">
-                    The input exceeded the configured OOD acceptance threshold.
-                    That threshold has not been independently validated, so this
-                    is a precautionary rejection—not a confirmed OOD diagnosis.
+                    Classifier outputs are retained and shown below as
+                    unverified candidates. The OOD threshold is provisional and
+                    has not been independently validated; exceeding it does not
+                    confirm that the input is out of distribution.
                   </p>
                   <p className="text-sm leading-relaxed">
-                    Try another clear image showing one leaf in even natural
-                    light. Do not treat this result as a disease or
-                    healthy-plant diagnosis.
+                    Review the predicted class together with the OOD flag. Do
+                    not treat either model output as a confirmed diagnosis.
                   </p>
                 </div>
               ) : candidateLeaves.length > 0 ? (
@@ -526,10 +526,10 @@ export default function ScanResultsPage() {
               </div>
               <div className="rounded-xl border border-border bg-card p-4">
                 <dt className="text-sm text-muted-foreground">
-                  Provisional labels
+                  Classifier outputs
                 </dt>
                 <dd className="mt-1 text-2xl font-bold">
-                  {candidateLeaves.length}
+                  {classifierOutputs.length}
                 </dd>
               </div>
               <div className="rounded-xl border border-border bg-card p-4">
@@ -537,13 +537,13 @@ export default function ScanResultsPage() {
                   Classification confidence
                 </dt>
                 <dd className="mt-1 text-2xl font-bold">
-                  {candidateLeaves.length
-                    ? `${((candidateLeaves.reduce((sum, leaf) => sum + (leaf.classification?.confidence ?? 0), 0) / candidateLeaves.length) * 100).toFixed(1)}%`
+                  {classifierOutputs.length
+                    ? `${((classifierOutputs.reduce((sum, leaf) => sum + (leaf.classification?.confidence ?? 0), 0) / classifierOutputs.length) * 100).toFixed(1)}%`
                     : "Unavailable"}
                 </dd>
-                {candidateLeaves.length > 0 && (
+                {classifierOutputs.length > 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Mean raw model score; not calibrated
+                    Mean raw score; not calibrated
                   </p>
                 )}
               </div>
@@ -578,7 +578,7 @@ export default function ScanResultsPage() {
             ) : (
               <div className="grid gap-4 xl:grid-cols-2">
                 {result.leaves.map((leaf) => {
-                  const rejected = isOodRejected(leaf);
+                  const oodFlagged = isOodFlagged(leaf);
                   const coverage = validCoverage(leaf);
                   const modes = visualizationModes(leaf, assetSources);
                   const uncertainty = leaf.prediction_uncertainty;
@@ -599,15 +599,17 @@ export default function ScanResultsPage() {
                         </div>
                         <span
                           className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                            rejected
+                            oodFlagged
                               ? "border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200"
                               : leaf.classification
                                 ? "border-primary/30 bg-primary/5 text-foreground"
                                 : "border-border text-muted-foreground"
                           }`}
                         >
-                          {rejected
-                            ? "Classification withheld"
+                          {oodFlagged
+                            ? leaf.classification
+                              ? "OOD flagged · unverified candidate"
+                              : "OOD flagged · no class output"
                             : isProvisionalCandidate(leaf)
                               ? "Provisional candidate"
                               : leaf.classification
@@ -616,23 +618,25 @@ export default function ScanResultsPage() {
                         </span>
                       </header>
 
-                      {rejected ? (
+                      {oodFlagged && !leaf.classification ? (
                         <div
                           className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3"
                           role="status"
                         >
                           <p className="font-semibold">Potential OOD input</p>
                           <p className="mt-1 text-sm text-muted-foreground">
-                            This leaf exceeded the configured OOD acceptance
-                            threshold. Its disease label is withheld.
+                            This leaf exceeded the provisional OOD threshold; no
+                            classifier output is available.
                           </p>
                         </div>
                       ) : leaf.classification ? (
                         <div className="rounded-xl bg-muted/50 p-3">
                           <p className="text-xs text-muted-foreground">
-                            {isProvisionalCandidate(leaf)
-                              ? "Provisional model candidate"
-                              : "Unverified classifier output"}
+                            {oodFlagged
+                              ? "Unverified model candidate · OOD flagged"
+                              : isProvisionalCandidate(leaf)
+                                ? "Provisional model candidate"
+                                : "Unverified classifier output"}
                           </p>
                           <p className="mt-1 font-semibold">
                             {formatClassName(leaf.classification.primary_class)}
@@ -642,6 +646,12 @@ export default function ScanResultsPage() {
                             {(leaf.classification.confidence * 100).toFixed(1)}%
                             · not calibrated
                           </p>
+                          {oodFlagged && (
+                            <p className="mt-2 text-sm text-amber-800 dark:text-amber-200">
+                              OOD threshold exceeded; review this candidate
+                              cautiously.
+                            </p>
+                          )}
                         </div>
                       ) : (
                         <p className="rounded-xl bg-muted/50 p-3 text-sm text-muted-foreground">
@@ -663,18 +673,18 @@ export default function ScanResultsPage() {
                           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                             {coverage === null
                               ? "Segmentation counts or mask alignment did not satisfy the display contract."
-                              : rejected
-                                ? "The segmentation is not validated for an OOD input; this is not a confirmed severity score."
+                              : oodFlagged
+                                ? "The OOD threshold was exceeded; segmentation and severity for this candidate are unvalidated."
                                 : "Pixel ratio from the model mask; severity thresholds are not agronomically validated."}
                           </p>
                         </div>
                         <div className="rounded-lg border border-border p-3">
                           <dt className="text-xs text-muted-foreground">
-                            OOD gate
+                            OOD flag
                           </dt>
                           <dd className="mt-1 font-semibold">
                             {leaf.ood
-                              ? rejected
+                              ? oodFlagged
                                 ? "Threshold exceeded"
                                 : "Threshold not exceeded"
                               : "Unavailable"}
@@ -750,7 +760,7 @@ export default function ScanResultsPage() {
                             </dt>
                             <dd>
                               {leaf.ood
-                                ? rejected
+                                ? oodFlagged
                                   ? "Exceeded provisional threshold"
                                   : "Did not exceed provisional threshold"
                                 : "Unavailable"}
@@ -819,12 +829,11 @@ export default function ScanResultsPage() {
                               className="sm:col-span-2"
                             >
                               <dt className="text-muted-foreground">
-                                Unverified classifier output · leaf{" "}
-                                {leaf.leaf_id + 1}
+                                Classifier output · leaf {leaf.leaf_id + 1}
                               </dt>
                               <dd>
                                 {leaf.classification
-                                  ? `${formatClassName(leaf.classification.primary_class)} · raw confidence ${leaf.classification.confidence.toFixed(4)}; no usable OOD acceptance result.`
+                                  ? `${formatClassName(leaf.classification.primary_class)} · raw confidence ${leaf.classification.confidence.toFixed(4)}; ${isOodFlagged(leaf) ? "OOD threshold exceeded; unverified candidate." : "no usable OOD acceptance result."}`
                                   : "Unavailable"}
                               </dd>
                             </div>
@@ -845,7 +854,7 @@ export default function ScanResultsPage() {
             <h2 id="recommendations-title" className="text-lg font-bold">
               Next steps
             </h2>
-            {hasOodRejection ? (
+            {hasOodFlag ? (
               <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
                 Capture a new close, well-lit image of one leaf and submit it
                 for review. Avoid disease-specific treatment based on this scan.
@@ -900,8 +909,8 @@ export default function ScanResultsPage() {
               {result.candidate_counts && (
                 <div className="sm:col-span-2">
                   <dt className="text-muted-foreground">
-                    Candidates: generated / valid / deduplicated / leaf
-                    accepted / disease eligible
+                    Candidates: generated / valid / deduplicated / leaf accepted
+                    / disease eligible
                   </dt>
                   <dd>
                     {result.candidate_counts.generated} /{" "}

@@ -260,7 +260,7 @@ def test_duplicate_candidates_are_removed_before_leaf_filtering():
     assert result.candidate_counts.disease_analysis_eligible == 2
 
 
-def test_ood_threshold_exceedance_withholds_class_and_plant_diagnosis():
+def test_ood_threshold_exceedance_retains_class_candidate_and_flags_plant_summary():
     ood = OODResult(
         score=3.0,
         threshold=2.0,
@@ -273,12 +273,37 @@ def test_ood_threshold_exceedance_withholds_class_and_plant_diagnosis():
 
     result = service.analyze(_image())
 
-    assert result.leaves[0].classification is None
+    assert result.leaves[0].classification.primary_class == "Crop___class_3"
     assert result.leaves[0].ood.is_ood is True
-    assert any(w.code == "OOD_ABSTENTION_UNVALIDATED" for w in result.leaves[0].warnings)
+    assert any(w.code == "OOD_FLAGGED_UNVALIDATED" for w in result.leaves[0].warnings)
     assert result.plant_summary.health_status.value == "unknown"
     assert result.plant_summary.valid_leaves_analyzed == 0
     assert result.plant_summary.primary_diagnosis is None
+
+
+def test_partial_result_retains_classifier_candidate_with_ood_flag():
+    ood = OODResult(
+        score=3.0,
+        threshold=2.0,
+        is_ood=True,
+        method="class_conditional_mahalanobis",
+        status="ood_unvalidated",
+        calibration_status="in_distribution_percentile_99_only",
+    )
+    service, _ = _service(masks=1, ood_result=ood)
+
+    def fail_segmentation(*_args, **_kwargs):
+        raise RuntimeError("segmentation unavailable")
+
+    service.segmenter.predict = fail_segmentation
+
+    result = service.analyze(_image())
+
+    assert result.status == "partial"
+    assert result.leaves[0].classification.primary_class == "Crop___class_3"
+    assert result.leaves[0].ood.is_ood is True
+    assert any(w.code == "OOD_FLAGGED_UNVALIDATED" for w in result.leaves[0].warnings)
+    assert result.plant_summary.valid_leaves_analyzed == 0
 
 
 def test_ood_scoring_failure_fails_the_inference_request():

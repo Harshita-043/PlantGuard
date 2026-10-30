@@ -45,9 +45,9 @@ class Settings(BaseSettings):
     PLANTGUARD_REMOTE_TIMEOUT_SECONDS: float = Field(default=60, gt=0, le=300)
     PLANTGUARD_REMOTE_MAX_CONCURRENCY: int = Field(default=1, ge=1, le=8)
     PLANTGUARD_DIAGNOSTICS_TOKEN: Optional[SecretStr] = None
-    PLANTGUARD_LEAF_FILTER_VERSION: str = "v2"
-    PLANTGUARD_DISEASE_CLASSIFIER_VARIANT: str = "original-pytorch-fp32"
-    PLANTGUARD_SEGFORMER_VARIANT: str = "original-transformers-fp32"
+    PLANTGUARD_LEAF_FILTER_VERSION: str = "v1"
+    PLANTGUARD_DISEASE_CLASSIFIER_VARIANT: str = "fp32"
+    PLANTGUARD_SEGFORMER_VARIANT: str = "plantseg-b0"
 
     @field_validator("PLANTGUARD_OOD_CALIBRATION_PATH", mode="before")
     @classmethod

@@ -54,6 +54,16 @@ def _safetensors_supported(value: str | None) -> bool:
         return False
 
 
+def _onnxruntime_supported(value: str | None) -> bool:
+    if value is None:
+        return False
+    try:
+        major, minor, *_ = (int(part) for part in value.split(".", 2))
+        return (major, minor) >= (1, 20) and major < 2
+    except ValueError:
+        return False
+
+
 def _mps_available() -> bool:
     try:
         import torch
@@ -117,6 +127,7 @@ def collect_runtime_capabilities(
         "sam2": _base_version(package_versions["sam2"]) == "1.0",
         "mobile_sam": _base_version(package_versions["mobile_sam"]) == "1.0",
         "timm": _base_version(package_versions["timm"]) == "1.0.30",
+        "onnxruntime": _onnxruntime_supported(package_versions["onnxruntime"]),
     }
     cuda: dict[str, Any] = {
         "available": None if not installed["torch"] else False,

@@ -1,6 +1,6 @@
 import type { MaskAsset, SingleLeafAnalysis } from "@shared/api";
 
-export function isOodRejected(leaf: Pick<SingleLeafAnalysis, "ood">) {
+export function isOodFlagged(leaf: Pick<SingleLeafAnalysis, "ood">) {
   const ood = leaf.ood;
   return Boolean(
     ood &&
@@ -17,7 +17,7 @@ export function isProvisionalCandidate(
   return Boolean(
     leaf.classification &&
     leaf.ood &&
-    !isOodRejected(leaf) &&
+    !isOodFlagged(leaf) &&
     leaf.ood.status !== "ood_unavailable",
   );
 }

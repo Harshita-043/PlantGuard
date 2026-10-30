@@ -7,6 +7,8 @@ import pytest
 import numpy as np
 
 from app.api.admin import _authorized
+from app.api.admin import runtime_diagnostics
+from app.core.config import settings
 from app.ml.device import DeviceManager
 from app.ml.errors import InferenceErrorCode, ModelCapabilityError
 from app.ml.remote import RemoteInferenceClient, validate_remote_base_url
@@ -51,6 +53,54 @@ def test_variant_selection_prefers_verified_optimized_variant_deterministically(
     result = registry.select("dino_disease_classifier", profile="cpu", capabilities=_caps())
     assert result["variant_id"] == "int8"
     assert result["path"] == Path("verified-checkpoint")
+
+
+def test_requested_model_version_includes_optimized_variant():
+    variants = [
+        _variant("v1-pytorch-fp32", model_version="v1"),
+        _variant("v1-onnx-int8", "optimized", model_version="v1",
+                 backend="onnxruntime-cpu",
+                 validation={"status": "validated"},
+                 benchmark={"latency_ms": 90.0, "ram_peak_gb": 2.0,
+                            "compatibility_results": {"cpu": "verified"}}),
+    ]
+    capabilities = _caps()
+    capabilities.inference_backends = {"onnxruntime": True}
+    capabilities.package_version_compatibility = {"onnxruntime": True}
+    registry = _registry(None, variants)
+
+    result = registry.select(
+        "dino_disease_classifier",
+        profile="cpu",
+        capabilities=capabilities,
+        requested_variant="v1",
+    )
+
+    assert result["variant_id"] == "v1-onnx-int8"
+
+
+def test_requested_model_version_falls_back_when_onnxruntime_is_missing():
+    variants = [
+        _variant("v1-pytorch-fp32", model_version="v1"),
+        _variant("v1-onnx-int8", "optimized", model_version="v1",
+                 backend="onnxruntime-cpu",
+                 validation={"status": "validated"},
+                 benchmark={"latency_ms": 90.0, "ram_peak_gb": 2.0,
+                            "compatibility_results": {"cpu": "verified"}}),
+    ]
+    capabilities = _caps()
+    capabilities.inference_backends = {"onnxruntime": False}
+    capabilities.package_version_compatibility = {"onnxruntime": False}
+    registry = _registry(None, variants)
+
+    result = registry.select(
+        "dino_disease_classifier",
+        profile="cpu",
+        capabilities=capabilities,
+        requested_variant="v1",
+    )
+
+    assert result["variant_id"] == "v1-pytorch-fp32"
 
 
 def test_variant_selection_never_uses_unvalidated_optimized_variant():
@@ -171,6 +221,33 @@ def test_variant_registry_verifies_hash_without_loading_checkpoint_tensors():
     assert registry._verified_path(_variant(path="artifacts/dino_disease/classes.json", sha256="0" * 64)) is None
 
 
+def test_variant_registry_rejects_lfs_pointer_even_when_pointer_hash_matches(tmp_path):
+    artifact = tmp_path / "artifacts" / "model.pt"
+    artifact.parent.mkdir()
+    artifact.write_text(
+        "version https://git-lfs.github.com/spec/v1\n"
+        "oid sha256:" + ("a" * 64) + "\n"
+        "size 1234\n",
+        encoding="ascii",
+    )
+    variant = _variant(
+        path="artifacts/model.pt",
+        sha256=hashlib.sha256(artifact.read_bytes()).hexdigest(),
+    )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "models": {"dinov2_vitb14_classifier": {"variants": [variant]}},
+    }), encoding="utf-8")
+    registry = ModelVariantRegistry(tmp_path, manifest_path=manifest_path)
+
+    with pytest.raises(ModelCapabilityError) as exc:
+        registry.select("dino_disease_classifier", profile="cpu", capabilities=_caps())
+
+    assert exc.value.code is InferenceErrorCode.ARTIFACT_INTEGRITY
+    assert "unhydrated Git LFS pointer" in str(exc.value)
+
+
 def test_capability_report_does_not_treat_integrated_graphics_as_cuda_or_leak_paths():
     report = collect_runtime_capabilities(profile="cpu").public_dict()
     assert report["profile"] == "cpu"
@@ -180,7 +257,27 @@ def test_capability_report_does_not_treat_integrated_graphics_as_cuda_or_leak_pa
     assert "C:\\Users" not in str(report)
 
 
-def test_manifest_registers_each_original_and_has_no_approved_optimized_variant():
+def test_protected_runtime_diagnostics_report_safe_model_inventory(monkeypatch):
+    from pydantic import SecretStr
+
+    secret = "runtime-diagnostics-test-token"
+    monkeypatch.setattr(settings, "PLANTGUARD_DIAGNOSTICS_TOKEN", SecretStr(secret))
+    monkeypatch.setattr(settings, "PLANTGUARD_INFERENCE_PROFILE", "cpu")
+
+    report = runtime_diagnostics(authorization=f"Bearer {secret}")
+    model = report["model_variants"]["sam2_hiera_base_plus"]
+
+    assert report["secrets_included"] is False
+    assert model["initialization_status"] == "unloaded"
+    assert model["loaded_model_identity"] is None
+    assert model["device"] is None
+    assert model["artifact_status"] in {"verified", "unavailable"}
+    assert isinstance(model["supported_operations"], list)
+    assert secret not in json.dumps(report)
+    assert "C:\\Users" not in json.dumps(report)
+
+
+def test_manifest_registers_originals_and_validated_optimized_variants():
     root = Path(__file__).resolve().parents[3]
     data = json.loads((root / "artifacts" / "model_manifest.json").read_text(encoding="utf-8"))
     assert set(data["models"]) == {
@@ -190,8 +287,25 @@ def test_manifest_registers_each_original_and_has_no_approved_optimized_variant(
     for model in data["models"].values():
         assert model["original_checkpoint"]["path"]
         assert any(variant["kind"] == "original" for variant in model["variants"])
-        assert not any(variant["kind"] != "original" and variant["validation"]["status"] == "validated"
-                       for variant in model["variants"])
+    leaf_filter = data["models"]["dinov2_vits14_leaf_filter"]
+    assert leaf_filter["original_checkpoint"]["path"] == "artifacts/dino_leaf_filter/dino_leaf_filter.pt"
+    assert {variant["variant_id"] for variant in leaf_filter["variants"]} == {
+        "v1-pytorch-fp32", "v2-pytorch-fp32", "v1-onnx-int8",
+    }
+    classifier = data["models"]["dinov2_vitb14_classifier"]
+    assert {variant["variant_id"] for variant in classifier["variants"]} == {
+        "original-pytorch-fp32", "onnx-fp32",
+    }
+    classifier_onnx = next(variant for variant in classifier["variants"] if variant["variant_id"] == "onnx-fp32")
+    assert classifier_onnx["validation"]["status"] == "rejected_parity_mismatch"
+    segformer = data["models"]["segformer_b0_plantseg"]
+    assert {variant["variant_id"] for variant in segformer["variants"]} == {
+        "original-transformers-fp32", "onnx-int8",
+    }
+    for model in data["models"].values():
+        for variant in model["variants"]:
+            if variant["kind"] != "original" and variant["validation"]["status"] != "rejected_parity_mismatch":
+                assert variant["validation"]["status"] == "validated"
 
 
 def test_explicit_cuda_request_is_not_silently_changed_to_cpu():

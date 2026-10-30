@@ -247,6 +247,7 @@ def test_local_readiness_checks_sam_config_inside_installed_package(monkeypatch,
     inference.segmenter._configuration_error = None
     inference.classifier.get_class_mapping = lambda: {index: str(index) for index in range(38)}
     inference._select_variant = lambda *_args: None
+    inference.ood_detector.validate_calibration = lambda: None
 
     def find_spec(name):
         return SimpleNamespace(origin=str(package_root / "__init__.py"))

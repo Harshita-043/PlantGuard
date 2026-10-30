@@ -62,7 +62,58 @@
             "split": null,
             "status": "not_evaluated"
           },
+          "model_version": "fp32",
           "variant_id": "original-pytorch-fp32"
+        },
+        {
+          "backend": "onnxruntime-cpu",
+          "benchmark": {
+            "compatibility_results": {
+              "cpu": "verified"
+            },
+            "latency_ms": null,
+            "model_load_ms": null,
+            "ram_peak_gb": null,
+            "status": "parity_validated_latency_not_measured",
+            "vram_peak_gb": null
+          },
+          "created": {
+            "date": null,
+            "tool": "ONNX export, opset 18",
+            "version": null
+          },
+          "device_profiles": [
+            "cpu"
+          ],
+          "kind": "optimized",
+          "label_mapping_identity": "same_as_model",
+          "model_version": "fp32",
+          "path": "artifacts/optimized/dino_disease/onnx/dino_disease_fp32_224.onnx",
+          "precision": "fp32",
+          "preprocessing_identity": "same_as_model",
+          "quantization_method": "none",
+          "rollback_target": "original-pytorch-fp32",
+          "runtime_requirements": [
+            "onnxruntime>=1.20,<2",
+            "CPUExecutionProvider"
+          ],
+          "sha256": "edc3682191f994b7b3df76c23ce45ad4809399d8adf860cdd9afe6a5aff9b5b5",
+          "sha256_status": "verified_by_streaming_sha256",
+          "source_checkpoint_identity": "same_as_model",
+          "validation": {
+            "dataset": "IMAGE_APP.jpg direct parity check against current PyTorch checkpoint",
+            "quality_metrics": {
+              "embedding_cosine_similarity": 0.9974322319030762,
+              "embedding_max_abs_difference": 0.390585720539093,
+              "logits_max_abs_difference": 0.46428918838500977,
+              "logits_mean_abs_difference": 0.13229696452617645,
+              "top1_agreement": true
+            },
+            "report": "Current-worktree direct parity check; historical export report did not reproduce",
+            "split": "single real image",
+            "status": "rejected_parity_mismatch"
+          },
+          "variant_id": "onnx-fp32"
         }
       ]
     },
@@ -77,16 +128,66 @@
         "source": "backend/app/ml/adapters/leaf_filter.py"
       },
       "original_checkpoint": {
-        "path": "artifacts/dino_leaf_filter/dino_leaf_filter_v2.pt",
-        "sha256": "03b3fb0337f60072d95f39634049bab211f4187b26343254595822413e30a268",
+        "path": "artifacts/dino_leaf_filter/dino_leaf_filter.pt",
+        "sha256": "555fed395710a7618f600083c53c97da1cdd57092d2eb0d402335231165f7a23",
         "sha256_status": "verified_by_streaming_sha256"
       },
       "preprocessing_identity": {
         "description": "RGB 224x224, ImageNet mean/std; adapter-defined binary mapping negative=0, positive=1.",
         "implementation": "backend/app/ml/adapters/leaf_filter.py"
       },
-      "source_checkpoint_identity": "Repository v2 checkpoint; training provenance and correspondence to existing v1 evaluation are unverified.",
+      "source_checkpoint_identity": "Repository v1 checkpoint; the historical evaluation report references this path, but dataset provenance is not independently verified.",
       "variants": [
+        {
+          "backend": "pytorch-native-dinov2",
+          "benchmark": {
+            "compatibility_results": {
+              "cpu": "blocked_runtime_not_installed",
+              "cuda": "blocked_runtime_not_installed"
+            },
+            "latency_ms": null,
+            "model_load_ms": null,
+            "ram_peak_gb": null,
+            "status": "not_measured",
+            "vram_peak_gb": null
+          },
+          "created": {
+            "date": null,
+            "tool": "original artifact",
+            "version": null
+          },
+          "device_profiles": [
+            "cpu",
+            "cuda"
+          ],
+          "kind": "original",
+          "label_mapping_identity": "same_as_model",
+          "path": "artifacts/dino_leaf_filter/dino_leaf_filter.pt",
+          "precision": "fp32",
+          "preprocessing_identity": "same_as_model",
+          "quantization_method": "none",
+          "rollback_target": null,
+          "runtime_requirements": [
+            "PyTorch"
+          ],
+          "sha256": "555fed395710a7618f600083c53c97da1cdd57092d2eb0d402335231165f7a23",
+          "sha256_status": "verified_by_streaming_sha256",
+          "source_checkpoint_identity": "same_as_model",
+          "validation": {
+            "dataset": "Historical report; dataset provenance is not independently verified",
+            "quality_metrics": {
+              "accuracy": 1.0,
+              "f1_score": 1.0,
+              "precision": 1.0,
+              "recall": 1.0,
+              "test_loss": 0.0008389828958341241
+            },
+            "split": "Reported 1,250-sample test split",
+            "status": "partial_historical_report_only"
+          },
+          "model_version": "v1",
+          "variant_id": "v1-pytorch-fp32"
+        },
         {
           "backend": "pytorch-native-dinov2",
           "benchmark": {
@@ -121,14 +222,69 @@
           ],
           "sha256": "03b3fb0337f60072d95f39634049bab211f4187b26343254595822413e30a268",
           "sha256_status": "verified_by_streaming_sha256",
-          "source_checkpoint_identity": "same_as_model",
+          "source_checkpoint_identity": "Repository v2 checkpoint; training provenance is unverified.",
           "validation": {
             "dataset": null,
             "quality_metrics": null,
             "split": null,
             "status": "not_evaluated_for_this_checkpoint"
           },
-          "variant_id": "original-pytorch-fp32"
+          "model_version": "v2",
+          "variant_id": "v2-pytorch-fp32"
+        },
+        {
+          "backend": "onnxruntime-cpu",
+          "benchmark": {
+            "compatibility_results": {
+              "cpu": "verified"
+            },
+            "latency_ms": 91.682,
+            "model_load_ms": null,
+            "ram_peak_gb": null,
+            "status": "measured_historical_report",
+            "vram_peak_gb": null
+          },
+          "created": {
+            "date": null,
+            "tool": "ONNX Runtime dynamic quantization",
+            "version": null
+          },
+          "device_profiles": [
+            "cpu"
+          ],
+          "kind": "optimized",
+          "label_mapping_identity": "same_as_model",
+          "model_version": "v1",
+          "path": "artifacts/optimized/dino_leaf_filter/onnx_int8/dino_leaf_filter_dynamic_int8.onnx",
+          "precision": "int8",
+          "preprocessing_identity": "same_as_model",
+          "quantization_method": "ONNX Runtime dynamic weight quantization",
+          "rollback_target": "v1-pytorch-fp32",
+          "runtime_requirements": [
+            "onnxruntime>=1.20,<2",
+            "CPUExecutionProvider"
+          ],
+          "sha256": "1ca2733b04d3b477764552492a76b9d3d2d8717d1ac48d646ebddff41d6983ab",
+          "sha256_status": "verified_by_streaming_sha256",
+          "source_checkpoint_identity": {
+            "path": "artifacts/dino_leaf_filter/dino_leaf_filter.pt",
+            "sha256": "555fed395710a7618f600083c53c97da1cdd57092d2eb0d402335231165f7a23"
+          },
+          "validation": {
+            "dataset": "Historical leaf-filter test report; dataset provenance is not independently verified",
+            "quality_metrics": {
+              "decision_agreement": 1.0,
+              "fp32_accuracy": 1.0,
+              "int8_accuracy": 1.0,
+              "max_absolute_probability_difference": 0.02482671929793831,
+              "mean_absolute_probability_difference": 0.00017958627904720025,
+              "samples": 1250
+            },
+            "report": "reports/device_validation/dino_leaf_filter/int8_full_validation.json",
+            "split": "Reported 1,250-sample test split",
+            "status": "validated"
+          },
+          "variant_id": "v1-onnx-int8"
         }
       ]
     },
@@ -331,13 +487,65 @@
             "split": null,
             "status": "partial_historical_report_only"
           },
+          "model_version": "plantseg-b0",
           "variant_id": "original-transformers-fp32"
+        },
+        {
+          "backend": "onnxruntime-cpu",
+          "benchmark": {
+            "compatibility_results": {
+              "cpu": "verified"
+            },
+            "latency_ms": 229.7055,
+            "model_load_ms": null,
+            "ram_peak_gb": null,
+            "status": "measured_historical_report",
+            "vram_peak_gb": null
+          },
+          "created": {
+            "date": null,
+            "tool": "ONNX Runtime dynamic INT8 quantization",
+            "version": null
+          },
+          "device_profiles": [
+            "cpu"
+          ],
+          "kind": "optimized",
+          "label_mapping_identity": "same_as_model",
+          "model_version": "plantseg-b0",
+          "path": "artifacts/optimized/segformer/onnx_int8/segformer_dynamic_int8.onnx",
+          "precision": "int8",
+          "preprocessing_identity": "same_as_model",
+          "quantization_method": "ONNX Runtime dynamic weight quantization",
+          "rollback_target": "original-transformers-fp32",
+          "runtime_requirements": [
+            "onnxruntime>=1.20,<2",
+            "CPUExecutionProvider"
+          ],
+          "sha256": "12f253b2c85ef39c1bce153e607e9ddef9032329cc19c8a772df1043b2b146d8",
+          "sha256_status": "verified_by_streaming_sha256",
+          "source_checkpoint_identity": "same_as_model",
+          "validation": {
+            "dataset": "Historical PlantSeg-compatible image comparison; dataset provenance is not independently verified",
+            "quality_metrics": {
+              "fp32_median_seconds": 0.23724554999989778,
+              "int8_median_seconds": 0.22970549999899958,
+              "mean_pixel_agreement": 0.9983963012695313,
+              "mean_logit_difference": 0.038575878646224734,
+              "minimum_pixel_agreement": 0.9950828552246094,
+              "images_tested": 20
+            },
+            "report": "reports/device_validation/segformer/multi_image_int8.json",
+            "split": "20-image comparison",
+            "status": "validated"
+          },
+          "variant_id": "onnx-int8"
         }
       ]
     }
   },
   "notes": [
-    "Original checkpoints are immutable. No optimized variants are registered.",
+    "Original checkpoints are immutable. The v1 DINOv2 leaf filter is the configured default; v2 remains registered as an explicit alternative. The validated v1 ONNX INT8 CPU export is preferred when ONNX Runtime is installed; selection falls back to original v1 PyTorch otherwise. The disease-classifier FP32 ONNX export is registered but rejected for inference because direct logits and embedding parity against the current PyTorch checkpoint did not reproduce; the original PyTorch checkpoint remains selected. SegFormer uses its validated ONNX INT8 CPU export when available, with original Transformers weights as fallback.",
     "Phase 6 check (2026-10-27): SHA-256 hashes were recorded from the local checkpoint files. These hashes verify byte identity only; source authenticity and training lineage remain unverified.",
     "Unverified measurements and provenance remain null rather than inferred from filenames or historical reports."
   ],

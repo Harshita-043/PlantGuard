@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatClassName,
-  isOodRejected,
+  isOodFlagged,
   isProvisionalCandidate,
   validCoverage,
   visualizationModes,
@@ -49,13 +49,13 @@ const measuredLeaf: Parameters<typeof validCoverage>[0] = {
 };
 
 describe("scan result presentation policies", () => {
-  it("does not accept an OOD-rejected classifier result as a candidate", () => {
+  it("keeps an OOD-flagged classifier output separate from accepted candidates", () => {
     const leaf: Parameters<typeof isProvisionalCandidate>[0] = {
       classification,
       ood: { ...ood, is_ood: true },
     };
 
-    expect(isOodRejected(leaf)).toBe(true);
+    expect(isOodFlagged(leaf)).toBe(true);
     expect(isProvisionalCandidate(leaf)).toBe(false);
   });
 
@@ -65,7 +65,7 @@ describe("scan result presentation policies", () => {
       ood: { ...ood, score: 2511.3 },
     };
 
-    expect(isOodRejected(leaf)).toBe(true);
+    expect(isOodFlagged(leaf)).toBe(true);
     expect(isProvisionalCandidate(leaf)).toBe(false);
   });
 
@@ -75,7 +75,7 @@ describe("scan result presentation policies", () => {
       ood,
     };
 
-    expect(isOodRejected(leaf)).toBe(false);
+    expect(isOodFlagged(leaf)).toBe(false);
     expect(isProvisionalCandidate(leaf)).toBe(true);
     expect(formatClassName(classification.primary_class)).toBe(
       "Tomato · Late blight",

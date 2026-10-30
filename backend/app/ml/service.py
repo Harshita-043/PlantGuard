@@ -430,8 +430,8 @@ class PlantAnalysisService:
                         ))
                     if ood_result.status == "ood_unvalidated" and ood_result.is_ood:
                         leaf_warnings.append(PipelineWarning(
-                            code="OOD_ABSTENTION_UNVALIDATED",
-                            message=f"The unvalidated Mahalanobis threshold was exceeded (distance {ood_result.score:.1f} > threshold {ood_result.threshold:.1f}); the class prediction is withheld pending OOD validation.",
+                            code="OOD_FLAGGED_UNVALIDATED",
+                            message=f"The unvalidated Mahalanobis threshold was exceeded (distance {ood_result.score:.1f} > threshold {ood_result.threshold:.1f}); the classifier prediction is retained as an unverified candidate and flagged for review.",
                             component="reliability", severity=WarningSeverity.WARNING,
                         ))
                     segmented.append(SingleLeafAnalysis(
@@ -445,7 +445,7 @@ class PlantAnalysisService:
                         leaf_filter_confidence=leaf_confidence,
                         candidate_score=candidate.sam_score,
                         candidate_source=candidate.model_variant,
-                        classification=None if ood_result.is_ood else classification,
+                        classification=classification,
                         ood=ood_result,
                         segmentation=seg_result,
                         severity=severity,
@@ -709,6 +709,12 @@ class PlantAnalysisService:
                 adapter._class_names = adapter._load_classes()
         adapter.artifact_path = selection["path"]
         adapter.artifact_version = selection["variant_id"]
+        if adapter.name in {
+            "dino_leaf_filter",
+            "dino_disease_classifier",
+            "segformer_disease_segmentation",
+        }:
+            adapter.execution_backend = selection["backend"]
         logger.info("model_variant_selected model=%s variant=%s profile=%s backend=%s precision=%s",
                     model_id, selection["variant_id"], self.profile,
                     selection["backend"], selection["precision"])
@@ -954,8 +960,8 @@ class PlantAnalysisService:
             )]
             if ood_result.is_ood:
                 leaf_warnings.append(PipelineWarning(
-                    code="OOD_ABSTENTION_UNVALIDATED",
-                    message="The provisional OOD threshold was exceeded; the class prediction is withheld.",
+                    code="OOD_FLAGGED_UNVALIDATED",
+                    message="The provisional OOD threshold was exceeded; the classifier prediction is retained as an unverified candidate and flagged for review.",
                     component="reliability",
                     severity=WarningSeverity.WARNING,
                 ))
@@ -966,7 +972,7 @@ class PlantAnalysisService:
                 leaf_filter_confidence=filter_score.confidence,
                 candidate_score=candidate.sam_score,
                 candidate_source=candidate.model_variant,
-                classification=None if ood_result.is_ood else classification,
+                classification=classification,
                 ood=ood_result,
                 severity=SeverityResult(
                     status="unavailable",
