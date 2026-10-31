@@ -50,7 +50,6 @@ import NotFound from "./pages/NotFound";
 import ScanPage from "./pages/ScanPage";
 import ScanResultsPage from "./pages/ScanResultsPage";
 import HistoryPage from "./pages/HistoryPage";
-import SettingsPage from "./pages/SettingsPage";
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, to: "/dashboard" },

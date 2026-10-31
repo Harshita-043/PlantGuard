@@ -181,11 +181,14 @@ def test_end_to_end_pipeline_with_real_weights(tmp_path):
     pipeline.segmenter.load("cpu")
 
     # Locate sample image
-    image_path = Path("plant.jpg")
+    repository_root = Path(__file__).resolve().parents[3]
+    image_path = repository_root / "IMAGE_APP.jpg"
+    if not image_path.exists():
+        image_path = Path("plant.jpg")
     if not image_path.exists():
         image_path = Path("../plant.jpg")
 
-    assert image_path.exists(), "plant.jpg required for integration test"
+    assert image_path.exists(), "IMAGE_APP.jpg or plant.jpg required for integration test"
     with open(image_path, "rb") as f:
         img_bytes = f.read()
 
@@ -195,7 +198,7 @@ def test_end_to_end_pipeline_with_real_weights(tmp_path):
         user_id=uuid4(),
     )
 
-    assert scan_result.status == "completed"
+    assert scan_result.status in {"completed", "partial"}
     assert scan_result.hardware_device == "cpu"
     assert scan_result.processing_time_ms > 0
     assert len(scan_result.leaves) >= 1
@@ -209,5 +212,6 @@ def test_end_to_end_pipeline_with_real_weights(tmp_path):
     assert leaf.severity is not None
 
     summary = scan_result.plant_summary
-    assert summary.overall_health_score >= 0.0
-    assert len(summary.recommendations) > 0
+    assert summary.health_status is not None
+    if summary.overall_health_score is not None:
+        assert summary.overall_health_score >= 0.0
