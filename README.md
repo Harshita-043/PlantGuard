@@ -19,7 +19,6 @@ PlantGuard AI delivers high-precision plant pathology diagnostics from uploaded 
 
 ## 2. System Architecture
 
-```mermaid
 flowchart TD
     subgraph Client["Frontend Client (React 18 + Vite)"]
         UI["Web Dashboard & Scan Interface"]
@@ -69,7 +68,7 @@ flowchart TD
     InferenceSvc -->|6. Persist Completed Result & Assets| PG
     InferenceSvc -->|7. Store Visual Assets| StorageAdapter
     Router -->|8. Structured Analysis JSON| UI
-```
+
 
 ---
 
