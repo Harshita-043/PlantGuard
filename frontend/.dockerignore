@@ -39,7 +39,6 @@ tmp
 types
 .git
 .gitignore
-dist
 service
 tests
 fixtures-pages
