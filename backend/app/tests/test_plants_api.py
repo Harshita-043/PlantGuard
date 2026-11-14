@@ -1,7 +1,7 @@
 """Plant CRUD and scan associations enforce account ownership."""
 
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -145,3 +145,58 @@ def test_foreign_plant_is_not_visible_or_mutable(plant_client):
     ).status_code == 404
     assert client.delete(f"/api/v1/plants/{foreign_id}").status_code == 404
     assert all(plant["id"] != str(foreign_id) for plant in client.get("/api/v1/plants").json())
+
+
+def test_unauthenticated_requests_are_rejected(plant_client):
+    client, owner, _, _ = plant_client
+    app.dependency_overrides.pop(get_current_user, None)
+    try:
+        response = client.get("/api/v1/plants")
+        assert response.status_code == 401
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: owner
+
+
+def test_invalid_plant_payload_returns_validation_error(plant_client):
+    client, _, _, _ = plant_client
+    # Empty string name should violate min_length=1
+    response = client.post("/api/v1/plants", json={"name": ""})
+    assert response.status_code == 422
+
+    # Missing name should violate required field
+    response_missing = client.post("/api/v1/plants", json={"species": "Only species"})
+    assert response_missing.status_code == 422
+
+
+def test_delete_plant_preserves_analysis_records(plant_client):
+    client, owner, _, session_factory = plant_client
+    plant_res = client.post("/api/v1/plants", json={"name": "Preserved Plant"})
+    plant_id = UUID(plant_res.json()["id"])
+
+    scan_id = uuid4()
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        session.add(
+            Analysis(
+                id=scan_id,
+                user_id=owner.id,
+                plant_id=plant_id,
+                image_object_key=f"test/{scan_id}",
+                status="pending",
+                image_content_type="image/jpeg",
+                image_size_bytes=100,
+                created_at=now,
+            )
+        )
+        session.commit()
+
+    # Delete plant
+    del_res = client.delete(f"/api/v1/plants/{plant_id}")
+    assert del_res.status_code == 204
+
+    # Verify scan still exists in database and plant_id is null
+    with session_factory() as session:
+        analysis = session.get(Analysis, scan_id)
+        assert analysis is not None
+        assert analysis.plant_id is None
+

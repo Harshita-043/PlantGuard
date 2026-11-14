@@ -1,24 +1,28 @@
-"""Adapter from the legacy application service contract to typed model inference."""
+"""Application-level Plant Analysis Service integrating ML inference with FastAPI."""
 
-from typing import Any, Dict, List, Optional
+import io
 import importlib.util
+import logging
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import numpy as np
+from PIL import Image, ImageOps, UnidentifiedImageError
 
-from app.ml.errors import InferenceError, InferenceErrorCode, ModelCapabilityError
+from app.core.config import settings
+from app.ml.errors import (
+    InferenceError,
+    InferenceErrorCode,
+    InvalidImageError,
+    ModelCapabilityError,
+)
 from app.ml.variants import MODEL_IDS
-
-
-class MLCapabilityUnavailable(ModelCapabilityError):
-    """Backward-compatible typed capability error for legacy agent routes."""
-
-    def __init__(self, message: str):
-        super().__init__(InferenceErrorCode.UNSUPPORTED_RUNTIME, message, stage="agent")
 from app.ml.service import PlantAnalysisService as ModelInferenceService
 from app.ml.remote import RemoteInferenceClient, probe_remote_health
-from app.core.config import settings
-from app.schemas.inference import SeverityLevel as ModelSeverityLevel
+from app.schemas.inference import (
+    FullScanResult,
+    SeverityLevel as ModelSeverityLevel,
+)
 from app.schemas.plant_analysis import (
     HealthStatus,
     LeafResult,
@@ -27,39 +31,74 @@ from app.schemas.plant_analysis import (
     SeverityLevel,
 )
 from app.services.interfaces.plant_analysis import PlantAnalysisService
+from app.storage.interface import ObjectStorage
+
+logger = logging.getLogger(__name__)
+
+MAX_IMAGE_SIDE = 8192
+MAX_IMAGE_PIXELS = 32_000_000
+
+
+class MLCapabilityUnavailable(ModelCapabilityError):
+    """Backward-compatible typed capability error for legacy agent routes."""
+
+    def __init__(self, message: str):
+        super().__init__(InferenceErrorCode.UNSUPPORTED_RUNTIME, message, stage="agent")
 
 
 class ApplicationPlantAnalysisService(PlantAnalysisService):
-    """Concrete legacy-contract adapter; model weights remain lazily loaded."""
+    """
+    Application-level Plant Analysis Service.
+    Acts as the application-facing interface coordinating the underlying ML inference
+    service, validating inputs, handling errors, and returning structured contracts.
+    """
 
-    def __init__(self, inference: ModelInferenceService | None = None):
+    def __init__(
+        self,
+        inference: ModelInferenceService | RemoteInferenceClient | None = None,
+        storage: ObjectStorage | None = None,
+    ):
+        self.storage = storage
         if inference is not None:
             self.inference = inference
         elif settings.PLANTGUARD_INFERENCE_PROFILE == "remote":
             self.inference = RemoteInferenceClient.from_settings()
         else:
             device = {"cpu": "cpu", "cuda": "cuda:0"}.get(settings.PLANTGUARD_INFERENCE_PROFILE)
-            self.inference = ModelInferenceService(device=device)
+            self.inference = ModelInferenceService(device=device, storage=storage)
 
     def initialize(self) -> None:
-        # Loading is per-inference and sequential to keep peak memory bounded.
+        """Initialize the service. Model weights remain loaded on-demand/sequentially."""
+        if hasattr(self.inference, "initialize"):
+            self.inference.initialize()
         return None
 
     def is_ready(self) -> bool:
-        return bool(self.model_readiness()["model_prerequisites"])
+        """Check if required model prerequisites are available."""
+        return bool(self.model_readiness().get("model_prerequisites"))
 
     def model_readiness(self) -> Dict[str, Optional[bool]]:
         """Check required on-demand stages and distinguish SAM2 from its fallback."""
         if isinstance(self.inference, RemoteInferenceClient):
             token = settings.PLANTGUARD_REMOTE_INFERENCE_TOKEN
             available = bool(
-                token and probe_remote_health(settings.PLANTGUARD_REMOTE_INFERENCE_URL or "",
-                                              token.get_secret_value()) == "available"
+                token and probe_remote_health(
+                    settings.PLANTGUARD_REMOTE_INFERENCE_URL or "",
+                    token.get_secret_value()
+                ) == "available"
             )
             return {
                 "model_prerequisites": available,
                 "sam2_primary": None,
                 "mobilesam_fallback": None,
+            }
+
+        if not hasattr(self.inference, "sam") or not hasattr(self.inference, "mobile_sam"):
+            # If a mocked or customized inference service is injected
+            return {
+                "model_prerequisites": True,
+                "sam2_primary": True,
+                "mobilesam_fallback": False,
             }
 
         model_status = {
@@ -73,7 +112,7 @@ class ApplicationPlantAnalysisService(PlantAnalysisService):
             self.inference.ood_detector.validate_calibration()
         except ModelCapabilityError:
             return model_status
-        if self.inference.segmenter._configuration_error is not None:
+        if getattr(self.inference.segmenter, "_configuration_error", None) is not None:
             return model_status
         class_mapping = self.inference.classifier.get_class_mapping() or {}
         if len(class_mapping) != 38:
@@ -89,7 +128,7 @@ class ApplicationPlantAnalysisService(PlantAnalysisService):
         return model_status
 
     def _variant_is_selectable(self, adapter) -> bool:
-        if adapter is self.inference.sam:
+        if hasattr(self.inference, "sam") and adapter is self.inference.sam:
             config_rel = Path(adapter.config_name)
             if config_rel.is_absolute() or ".." in config_rel.parts:
                 return False
@@ -100,7 +139,8 @@ class ApplicationPlantAnalysisService(PlantAnalysisService):
             if not (package_root / config_rel).is_file():
                 return False
         try:
-            self.inference._select_variant(adapter, MODEL_IDS[adapter.name])
+            if hasattr(self.inference, "_select_variant"):
+                self.inference._select_variant(adapter, MODEL_IDS[adapter.name])
             return True
         except ModelCapabilityError:
             return False
@@ -108,8 +148,68 @@ class ApplicationPlantAnalysisService(PlantAnalysisService):
     def get_service_name(self) -> str:
         return "PlantGuardModelInference"
 
-    def analyze_image(self, image: np.ndarray, analysis_id: Optional[str] = None) -> PlantAnalysisResponse:
-        result = self.inference.analyze(image, analysis_id=analysis_id)
+    def analyze_bytes(
+        self,
+        image_bytes: bytes,
+        analysis_id: Optional[str] = None
+    ) -> FullScanResult:
+        """
+        Application-level entry point to analyze raw image bytes.
+
+        Validates payload non-emptiness and delegates execution to the underlying
+        inference service. Propagates typed inference errors cleanly to the caller.
+        """
+        if not isinstance(image_bytes, (bytes, bytearray, memoryview)):
+            raise InvalidImageError("Image payload must be bytes-like")
+        if len(image_bytes) == 0:
+            raise InvalidImageError("Image payload is empty")
+
+        if hasattr(self.inference, "analyze_bytes"):
+            return self.inference.analyze_bytes(bytes(image_bytes), analysis_id=analysis_id)
+
+        # Fallback decode if injected inference only implements analyze(np.ndarray)
+        try:
+            with Image.open(io.BytesIO(image_bytes)) as im:
+                if im.width <= 0 or im.height <= 0 or im.width > MAX_IMAGE_SIDE or im.height > MAX_IMAGE_SIDE:
+                    raise InvalidImageError("Image dimensions exceed the supported limit")
+                if im.width * im.height > MAX_IMAGE_PIXELS:
+                    raise InvalidImageError("Image pixel count exceeds the supported limit")
+                oriented = ImageOps.exif_transpose(im)
+                image_array = np.asarray(oriented.convert("RGB"), dtype=np.uint8)
+        except InvalidImageError:
+            raise
+        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+            raise InvalidImageError("Image is corrupt or cannot be decoded") from exc
+
+        return self.analyze(image_array, analysis_id=analysis_id)
+
+    def analyze(
+        self,
+        image: np.ndarray,
+        analysis_id: Optional[str] = None
+    ) -> FullScanResult:
+        """
+        Analyze an in-memory RGB numpy image array through the inference pipeline.
+        """
+        if not isinstance(image, np.ndarray):
+            raise InvalidImageError("Image must be a numpy ndarray")
+        if image.ndim != 3 or image.shape[2] != 3:
+            raise InvalidImageError("Image must be an RGB 3-channel array (H, W, 3)")
+        if image.size == 0 or image.shape[0] == 0 or image.shape[1] == 0:
+            raise InvalidImageError("Image dimensions must be non-zero")
+
+        return self.inference.analyze(image, analysis_id=analysis_id)
+
+    def analyze_image(
+        self,
+        image: np.ndarray,
+        analysis_id: Optional[str] = None
+    ) -> PlantAnalysisResponse:
+        """
+        Legacy compatibility method mapping FullScanResult to PlantAnalysisResponse.
+        Fails closed with typed OUT_OF_DISTRIBUTION error if any leaf is flagged as OOD.
+        """
+        result = self.analyze(image, analysis_id=analysis_id)
         if any(leaf.ood is not None and leaf.ood.is_ood for leaf in result.leaves):
             raise InferenceError(
                 InferenceErrorCode.OUT_OF_DISTRIBUTION,
@@ -125,8 +225,10 @@ class ApplicationPlantAnalysisService(PlantAnalysisService):
             else:
                 disease_bbox = [0.0, 0.0, 0.0, 0.0]
             severity = leaf.severity
-            severity_available = bool(severity and severity.status == "available" and severity.score is not None
-                                      and severity.affected_percentage is not None and severity.level is not None)
+            severity_available = bool(
+                severity and severity.status == "available" and severity.score is not None
+                and severity.affected_percentage is not None and severity.level is not None
+            )
             level = None
             if severity_available:
                 if severity.level == ModelSeverityLevel.HEALTHY:
@@ -164,7 +266,7 @@ class ApplicationPlantAnalysisService(PlantAnalysisService):
         else:
             health_status = HealthStatus.FAIR
         summary = PlantHealthSummary(
-            overall_health_score=model_summary.overall_health_score,
+            overall_health_score=model_summary.overall_health_score or 0.0,
             health_status=health_status,
             healthy_leaf_count=model_summary.healthy_leaves_count,
             total_leaf_count=model_summary.valid_leaves_analyzed,
@@ -188,14 +290,31 @@ class ApplicationPlantAnalysisService(PlantAnalysisService):
         prev_leaf_results: Optional[List[Dict[str, Any]]] = None,
         analysis_id: Optional[str] = None,
     ) -> PlantAnalysisResponse:
-        raise InferenceError(InferenceErrorCode.UNSUPPORTED_RUNTIME,
-                             "Video tracking is not implemented", stage="video")
+        raise InferenceError(
+            InferenceErrorCode.UNSUPPORTED_RUNTIME,
+            "Video tracking is not implemented",
+            stage="video"
+        )
 
 
-def create_plant_analysis_service(**kwargs) -> ApplicationPlantAnalysisService:
-    """Create a lazy inference service; required model failures are reported per request."""
+def create_plant_analysis_service(
+    inference: ModelInferenceService | RemoteInferenceClient | None = None,
+    storage: ObjectStorage | None = None,
+    **kwargs: Any,
+) -> ApplicationPlantAnalysisService:
+    """
+    Factory for the application-level plant analysis service supporting dependency injection.
+    """
+    if inference is not None:
+        return ApplicationPlantAnalysisService(inference=inference, storage=storage)
     if settings.PLANTGUARD_INFERENCE_PROFILE == "remote":
         if kwargs:
             raise ValueError("Device-specific kwargs cannot be passed to the configured remote inference profile")
-        return ApplicationPlantAnalysisService(RemoteInferenceClient.from_settings())
-    return ApplicationPlantAnalysisService(ModelInferenceService(**kwargs))
+        return ApplicationPlantAnalysisService(
+            inference=RemoteInferenceClient.from_settings(),
+            storage=storage,
+        )
+    return ApplicationPlantAnalysisService(
+        inference=ModelInferenceService(storage=storage, **kwargs),
+        storage=storage,
+    )

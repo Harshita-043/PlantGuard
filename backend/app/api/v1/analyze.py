@@ -129,8 +129,13 @@ async def analyze_image(
             if settings.PLANTGUARD_INFERENCE_PROFILE == "remote"
             else create_plant_analysis_service(storage=storage)
         )
+        analyze_runner = (
+            application_service.analyze_bytes
+            if hasattr(application_service, 'analyze_bytes')
+            else application_service.inference.analyze_bytes
+        )
         result = await run_in_threadpool(
-            application_service.inference.analyze_bytes,
+            analyze_runner,
             image_content,
             analysis_id=str(analysis_id),
         )
