@@ -580,6 +580,7 @@ as the project evolves.
 The following items are documented as deferred rather than part of the
 current core inference pipeline:
 
+- Services and features implementation
 - Multi-agent diagnostic orchestration.
 - Retrieval-augmented generation (RAG) for agronomic and treatment
   knowledge.
